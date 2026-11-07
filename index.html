@@ -294,7 +294,8 @@
             home_qr_image: '',
             hidden_tabs: [],
             site_theme: { preset: 'standard', btnColor: '#d97706', cardBg: 'rgba(12, 12, 12, 0.95)', borderColor: 'rgba(245, 158, 11, 0.4)', bgUrl: '' },
-            countdown: { title: 'Épreuves du Bac Pro', date: '2026-06-15T08:00' }
+            countdown: null,
+            agenda_posts: []
         };
 
         const DB = {
@@ -325,7 +326,11 @@
             fichesSubTab: 'calc',
             adminFichesSubTab: 'calc',
             selectedCalcId: null,
-            generalSubjectFilter: 'all'
+            generalSubjectFilter: 'all',
+            editingAgendaId: null,
+            agendaMonthOffset: 0,
+            selectedAgendaDate: '',
+            newAgendaDate: ''
         };
 
         function getCurrentMonthKey() {
@@ -794,7 +799,7 @@
             { id: 'g_resources', label: 'Ressources pédagogiques', icon: 'book-open', tabs: [['fiches', 'Fiches méthodes', 'book-bookmark'], ['revisions', 'Fiches de révision', 'book-open'], ['exams', 'Sujets & corrigés Bac', 'file-pdf'], ['formations', 'Orientation & Post-Bac', 'graduation-cap']] },
             { id: 'g_training', label: 'Entraînement', icon: 'dumbbell', tabs: [['quizzes', 'Quiz & évaluations', 'circle-question'], ['games', 'Mots croisés', 'puzzle-piece'], ['bac_sim', 'Simulateur Bac', 'calculator'], ['flashcards', 'Flashcards', 'clone']] },
             { id: 'g_challenges', label: 'Défis & classement', icon: 'trophy', tabs: [['quests', 'Défis & quêtes', 'flag-checkered'], ['leaderboard', 'Classement classe', 'trophy']] },
-            { id: 'g_class', label: 'Vie de la classe', icon: 'people-group', tabs: [['polls', 'Sondages en direct', 'square-poll-vertical'], ['ideas', 'Boîte à idées', 'lightbulb']] },
+            { id: 'g_class', label: 'Vie de la classe', icon: 'people-group', tabs: [['agenda', 'Agenda', 'calendar-days'], ['polls', 'Sondages en direct', 'square-poll-vertical'], ['ideas', 'Boîte à idées', 'lightbulb']] },
             { id: 'g_comm', label: 'Communication', icon: 'comments', tabs: [['chat', 'Messagerie & canal', 'comments'], ['tickets', 'Support & mails', 'envelope']] },
             { id: 'g_me', label: 'Mon espace', icon: 'user-astronaut', tabs: [['profile', 'Mon profil & avatar', 'user-astronaut'], ['appreciations', 'Mes appréciations', 'file-contract'], ['sanctions', 'Mes sanctions', 'triangle-exclamation'], ['notes', 'Notes (traitement de texte)', 'file-lines'], ['sheet', 'Tableur (Excel)', 'file-excel']] }
         ];
@@ -1503,6 +1508,7 @@
             }
 
             if (state.tab === 'home') return renderHome();
+            if (state.tab === 'agenda') return renderAgendaTab(user);
             if (state.tab === 'quizzes') return renderQuizzesTab(user);
             if (state.tab === 'quests') return renderQuestsTab(user);
             if (state.tab === 'fiches') return renderFichesTab();
@@ -1538,16 +1544,72 @@
             </div>`;
         }
 
+        async function adminSaveCountdown(e) {
+            e.preventDefault();
+            if (!isAdmin()) return alert("Action réservée à l’administration.");
+            const title = (document.getElementById('countdown-title')?.value || '').trim();
+            const date = document.getElementById('countdown-date')?.value || '';
+            if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + 'T00:00:00'))) {
+                return alert("Veuillez renseigner un titre et une date valides.");
+            }
+            await DB.set('countdown', {
+                title,
+                date,
+                adminCreated: true,
+                updatedAt: new Date().toISOString()
+            });
+            showToast("Compte à rebours enregistré", "Il est maintenant visible sur la page d’accueil.");
+            state.tab = 'admin';
+            state.adminSub = 'countdown';
+            render();
+        }
+
+        async function adminDeleteCountdown() {
+            if (!isAdmin()) return alert("Action réservée à l’administration.");
+            if (!confirm("Supprimer le compte à rebours de la page d’accueil ?")) return;
+            await DB.set('countdown', null);
+            showToast("Compte à rebours supprimé", "La page d’accueil n’affichera plus de compte à rebours.");
+            render();
+        }
+
+        function getCountdownDays(dateValue) {
+            if (!dateValue) return null;
+            const parts = String(dateValue).slice(0, 10).split('-').map(Number);
+            if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return null;
+            const target = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+            const now = new Date();
+            const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+            return Math.ceil((target - today) / 86400000);
+        }
+
+        function updateHomeCountdownDisplay() {
+            const el = document.getElementById('home-countdown-days');
+            if (!el) return;
+            const countdown = DB.get('countdown');
+            if (!countdown || !countdown.adminCreated || !countdown.date) return;
+            const days = getCountdownDays(countdown.date);
+            el.textContent = days === null ? 'Date invalide' : (days >= 0 ? `${days} jour${days > 1 ? 's' : ''} restant${days > 1 ? 's' : ''} !` : 'Événement passé');
+        }
+
         function renderHome() {
-            let countdown = DB.get('countdown') || { title: 'Épreuves du Bac Pro', date: '2026-06-15T08:00' };
-            let diffDays = Math.ceil((new Date(countdown.date) - new Date()) / (1000 * 60 * 60 * 24));
-            let qrCodeImg = DB.get('home_qr_image') || '';
+            const countdown = DB.get('countdown');
+            const hasCountdown = !!(countdown && countdown.adminCreated && countdown.title && countdown.date);
+            const diffDays = hasCountdown ? getCountdownDays(countdown.date) : null;
+            const qrCodeImg = DB.get('home_qr_image') || '';
 
             return `<div class="max-w-3xl mx-auto space-y-6 text-center">
-                <div class="dyn-card border p-8 space-y-3 rounded-3xl shadow-2xl">
-                    <h2 class="text-3xl font-black text-amber-400">⏳ ${countdown.title}</h2>
-                    <div class="text-4xl font-extrabold text-white mt-2">${diffDays >= 0 ? diffDays + ' jours restants !' : 'Événement passé'}</div>
-                </div>
+                ${hasCountdown ? `
+                    <div class="dyn-card border p-8 space-y-3 rounded-3xl shadow-2xl">
+                        <h2 class="text-3xl font-black text-amber-400">⏳ ${escapeHtml(countdown.title)}</h2>
+                        <div id="home-countdown-days" class="text-4xl font-extrabold text-white mt-2">${diffDays === null ? 'Date invalide' : (diffDays >= 0 ? `${diffDays} jour${diffDays > 1 ? 's' : ''} restant${diffDays > 1 ? 's' : ''} !` : 'Événement passé')}</div>
+                    </div>
+                ` : `
+                    <div class="dyn-card border p-6 rounded-3xl space-y-2">
+                        <div class="text-3xl text-amber-400"><i class="fa-regular fa-calendar-xmark"></i></div>
+                        <h2 class="text-xl font-black text-amber-300">Aucun compte à rebours</h2>
+                        <p class="text-xs text-amber-200/60">Aucun événement n’a été programmé pour le moment.</p>
+                    </div>
+                `}
 
                 ${qrCodeImg ? `
                     <div class="dyn-card border p-6 rounded-3xl space-y-3 flex flex-col items-center">
@@ -1562,6 +1624,9 @@
                 </div>
             </div>`;
         }
+
+        // Actualise le nombre de jours si la page reste ouverte.
+        setInterval(updateHomeCountdownDisplay, 60000);
 
         /* -------------------------------------------------------------
            ONGLET FICHES MÉTHODES (2 SOUS-ONGLETS ÉLÈVE)
@@ -3285,11 +3350,157 @@
             links.splice(index,1); await DB.set('cvl_links',links); render();
         }
 
+        function formatAgendaDate(value) {
+            if (!value) return 'Date non précisée';
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? 'Date invalide' : d.toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: value.includes('T') ? 'short' : undefined });
+        }
+
+        function agendaDateKey(value) {
+            return String(value || '').slice(0, 10);
+        }
+
+        function agendaMonthLabel(date) {
+            return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+        }
+
+        function agendaMoveMonth(delta) {
+            state.agendaMonthOffset = (state.agendaMonthOffset || 0) + delta;
+            render();
+        }
+
+        function agendaGoToday() {
+            state.agendaMonthOffset = 0;
+            state.selectedAgendaDate = new Date().toISOString().slice(0, 10);
+            render();
+        }
+
+        function agendaSelectDay(dateKey) {
+            state.selectedAgendaDate = dateKey;
+            render();
+        }
+
+        function agendaCreateForSelectedDay() {
+            if (!isProf() && !isAdmin()) return;
+            state.editingAgendaId = null;
+            state.newAgendaDate = (state.selectedAgendaDate || new Date().toISOString().slice(0, 10)) + 'T08:00';
+            render();
+        }
+
+        function renderAgendaCalendar(canManage = false) {
+            const posts = (DB.get('agenda_posts') || []).slice();
+            const now = new Date();
+            const monthDate = new Date(now.getFullYear(), now.getMonth() + (state.agendaMonthOffset || 0), 1);
+            const year = monthDate.getFullYear();
+            const month = monthDate.getMonth();
+            const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            const selected = state.selectedAgendaDate || todayKey;
+            const cells = [];
+            for (let i = 0; i < firstWeekday; i++) cells.push('<div class="min-h-24 md:min-h-28 rounded-xl bg-stone-950/30 border border-stone-800/40"></div>');
+            for (let day = 1; day <= daysInMonth; day++) {
+                const key = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                const dayPosts = posts.filter(post => agendaDateKey(post.date) === key).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+                const isToday = key === todayKey;
+                const isSelected = key === selected;
+                cells.push(`<button type="button" onclick="agendaSelectDay('${key}')" class="min-w-0 min-h-24 md:min-h-28 text-left p-2 rounded-xl border transition ${isSelected ? 'border-sky-400 bg-sky-500/10 ring-1 ring-sky-400/40' : isToday ? 'border-amber-400/70 bg-amber-500/5' : 'border-stone-800 bg-stone-950/50 hover:border-amber-700/60'}">
+                    <div class="flex items-center justify-between mb-1"><span class="text-xs font-black ${isToday ? 'text-amber-300' : 'text-amber-100'}">${day}</span>${dayPosts.length ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300">${dayPosts.length}</span>` : ''}</div>
+                    <div class="space-y-1">${dayPosts.slice(0,3).map(post=>`<div class="truncate rounded-md px-1.5 py-1 text-[9px] md:text-[10px] font-semibold bg-sky-500/15 text-sky-200 border-l-2 border-sky-400">${escapeHtml(post.title || 'Événement')}</div>`).join('')}${dayPosts.length>3?`<p class="text-[9px] text-amber-200/50">+${dayPosts.length-3} autre(s)</p>`:''}</div>
+                </button>`);
+            }
+            const selectedPosts = posts.filter(post => agendaDateKey(post.date) === selected).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+            const selectedDateLabel = new Date(selected + 'T12:00:00').toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+            return `<section class="dyn-card border p-4 md:p-6 rounded-3xl space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div><p class="text-[10px] uppercase tracking-widest text-sky-300 font-black">Calendrier</p><h3 class="text-xl md:text-2xl font-black text-amber-100 capitalize">${agendaMonthLabel(monthDate)}</h3></div>
+                    <div class="flex items-center gap-2"><button type="button" onclick="agendaMoveMonth(-1)" aria-label="Mois précédent" class="w-10 h-10 rounded-xl bg-stone-900 border border-amber-900/40 text-amber-200 hover:bg-stone-800"><i class="fa-solid fa-chevron-left"></i></button><button type="button" onclick="agendaGoToday()" class="px-3 h-10 rounded-xl bg-stone-900 border border-amber-900/40 text-amber-200 text-xs font-bold">Aujourd’hui</button><button type="button" onclick="agendaMoveMonth(1)" aria-label="Mois suivant" class="w-10 h-10 rounded-xl bg-stone-900 border border-amber-900/40 text-amber-200 hover:bg-stone-800"><i class="fa-solid fa-chevron-right"></i></button></div>
+                </div>
+                <div class="grid grid-cols-7 gap-1.5 text-center">${['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(day=>`<div class="py-2 text-[9px] md:text-[10px] uppercase tracking-wider font-black text-amber-200/50">${day}</div>`).join('')}${cells.join('')}</div>
+                <div class="border-t border-amber-900/30 pt-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2"><h4 class="font-black text-amber-100 capitalize"><i class="fa-regular fa-calendar-check text-sky-300 mr-2"></i>${selectedDateLabel}</h4>${canManage ? `<button type="button" onclick="agendaCreateForSelectedDay()" class="px-3 py-2 rounded-xl dyn-btn text-white text-[11px] font-bold"><i class="fa-solid fa-plus mr-1"></i>Ajouter un rendez-vous</button>` : ''}</div>
+                    ${selectedPosts.length ? `<div class="space-y-2">${selectedPosts.map(post=>`<article class="p-3 rounded-xl bg-stone-900/70 border border-amber-900/30 flex flex-wrap items-start justify-between gap-2"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="text-[10px] font-black text-sky-300">${String(post.date||'').includes('T') ? escapeHtml(String(post.date).slice(11,16)) : 'Toute la journée'}</span><span class="text-[9px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-200">${escapeHtml(post.category || 'Information')}</span></div><h5 class="font-bold text-amber-100 mt-1">${escapeHtml(post.title || '')}</h5>${post.description?`<p class="text-xs text-amber-100/70 mt-1 whitespace-pre-wrap">${escapeHtml(post.description)}</p>`:''}${post.image?`<img src="${escapeHtml(post.image)}" alt="Illustration" loading="lazy" class="mt-2 max-h-40 rounded-lg object-cover" onerror="this.style.display='none'">`:''}<p class="text-[9px] text-amber-200/40 mt-2">${escapeHtml(post.authorName || 'Équipe pédagogique')}</p></div>${canManage?`<div class="flex gap-1"><button type="button" onclick="editAgendaPost('${encodeURIComponent(post.id)}')" class="px-2.5 py-1.5 bg-stone-800 text-amber-200 rounded-lg text-[10px]">Modifier</button><button type="button" onclick="deleteAgendaPost('${encodeURIComponent(post.id)}')" class="px-2.5 py-1.5 bg-red-900/50 text-red-200 rounded-lg text-[10px]">Supprimer</button></div>`:''}</article>`).join('')}</div>` : '<p class="text-xs text-amber-200/50 py-2">Aucun rendez-vous ou événement prévu ce jour-là.</p>'}
+                </div>
+            </section>`;
+        }
+
+        function renderAgendaCards() {
+            return renderAgendaCalendar(false);
+        }
+
+        function renderAgendaTab(user) {
+            return `<div class="max-w-6xl mx-auto space-y-5 text-xs">
+                <div class="dyn-card border p-6 rounded-3xl"><div class="flex items-center gap-3"><div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-300 flex items-center justify-center text-2xl"><i class="fa-solid fa-calendar-days"></i></div><div><h2 class="text-xl font-black text-amber-100">Agenda de la classe</h2><p class="text-amber-200/60 mt-1">Consulte les rendez-vous, événements, sorties et échéances de la classe.</p></div></div></div>
+                ${renderAgendaCards()}
+            </div>`;
+        }
+
+        function renderAgendaManager() {
+            if (!isProf() && !isAdmin()) return renderBlockedSection('Accès refusé', 'La publication dans l’agenda est réservée aux professeurs et aux administrateurs.');
+            const posts = DB.get('agenda_posts') || [];
+            const current = posts.find(x => x.id === state.editingAgendaId) || null;
+            return `<div class="space-y-4">
+                ${renderAgendaCalendar(true)}
+                <div class="dyn-card border p-6 rounded-3xl space-y-4">
+                <div><h3 class="font-bold text-amber-300"><i class="fa-solid fa-calendar-plus mr-2"></i>${current ? 'Modifier une publication' : 'Publier dans l’agenda'}</h3><p class="text-[11px] text-amber-200/60 mt-1">Les publications seront visibles par tous les utilisateurs dans la rubrique Agenda.</p></div>
+                <form onsubmit="saveAgendaPost(event)" class="space-y-3 p-4 bg-stone-900/80 rounded-2xl border">
+                    <input id="agenda-title" maxlength="120" required value="${current ? escapeHtml(current.title) : ''}" placeholder="Titre de l’événement ou de l’information" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3"><div><label class="block text-amber-200 mb-1">Date et heure</label><input id="agenda-date" type="datetime-local" required value="${current ? escapeHtml(String(current.date || '').slice(0,16)) : escapeHtml(state.newAgendaDate || '')}" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"></div><div><label class="block text-amber-200 mb-1">Catégorie</label><select id="agenda-category" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100">${['Événement','Sortie scolaire','Devoir / échéance','Information','Actualité','Autre'].map(x=>`<option ${current && current.category===x?'selected':''}>${x}</option>`).join('')}</select></div></div>
+                    <textarea id="agenda-description" rows="4" maxlength="3000" placeholder="Description, lieu, consignes, informations pratiques…" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100">${current ? escapeHtml(current.description || '') : ''}</textarea>
+                    <div><label class="block text-amber-200 mb-1">Photo ou illustration (lien d’image facultatif)</label><input id="agenda-image" type="url" value="${current ? escapeHtml(current.image || '') : ''}" placeholder="https://…" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><p class="text-[10px] text-amber-200/40 mt-1">Utilise un lien direct vers une image accessible publiquement.</p></div>
+                    <div class="flex flex-wrap gap-2"><button type="submit" class="flex-1 py-2.5 dyn-btn text-white font-bold rounded-xl"><i class="fa-solid fa-paper-plane mr-2"></i>${current ? 'Enregistrer les modifications' : 'Publier'}</button>${current ? '<button type="button" onclick="cancelAgendaEdit()" class="px-4 py-2.5 bg-stone-800 text-amber-200 rounded-xl">Annuler</button>' : ''}</div>
+                </form>
+                <div class="space-y-2"><h4 class="font-bold text-amber-300">Publications existantes</h4>${posts.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))).map(post=>`<div class="p-3 bg-stone-900 border border-amber-900/30 rounded-xl flex flex-wrap items-center justify-between gap-3"><div class="min-w-0"><b class="text-amber-100">${escapeHtml(post.title)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(formatAgendaDate(post.date))} · ${escapeHtml(post.category || 'Information')}</p></div><div class="flex gap-2"><button onclick="editAgendaPost('${encodeURIComponent(post.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">Modifier</button><button onclick="deleteAgendaPost('${encodeURIComponent(post.id)}')" class="px-3 py-1.5 bg-red-900/60 text-red-200 rounded-lg">Supprimer</button></div></div>`).join('') || '<p class="text-xs text-amber-200/50">Aucune publication.</p>'}</div>
+                </div>
+            </div>`;
+        }
+
+        async function saveAgendaPost(e) {
+            e.preventDefault();
+            if (!isProf() && !isAdmin()) return alert('Action réservée aux professeurs et aux administrateurs.');
+            const title = (document.getElementById('agenda-title')?.value || '').trim();
+            const date = document.getElementById('agenda-date')?.value || '';
+            const description = (document.getElementById('agenda-description')?.value || '').trim();
+            const category = document.getElementById('agenda-category')?.value || 'Information';
+            const imageRaw = (document.getElementById('agenda-image')?.value || '').trim();
+            const image = imageRaw ? safeHttpUrl(imageRaw) : '';
+            if (!title || !date || Number.isNaN(new Date(date).getTime())) return alert('Veuillez renseigner un titre et une date valides.');
+            if (imageRaw && !image) return alert('Le lien de l’image doit être une adresse HTTP ou HTTPS valide.');
+            const posts = DB.get('agenda_posts') || [];
+            const user = getCurrentUser() || {};
+            const existing = posts.find(x => x.id === state.editingAgendaId);
+            const entry = { id: existing ? existing.id : `agenda_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, title, date, category, description, image, authorName: user.pseudo || user.username || 'Équipe pédagogique', authorRole: user.role, updatedAt: new Date().toISOString() };
+            if (existing) Object.assign(existing, entry); else posts.push(entry);
+            await DB.set('agenda_posts', posts);
+            state.editingAgendaId = null;
+            state.newAgendaDate = '';
+            showToast('Agenda mis à jour', existing ? 'La publication a été modifiée.' : 'La publication est maintenant visible dans l’agenda.');
+            render();
+        }
+
+        function editAgendaPost(encodedId) {
+            if (!isProf() && !isAdmin()) return alert('Action réservée aux professeurs et aux administrateurs.');
+            const id = decodeURIComponent(encodedId);
+            if (!(DB.get('agenda_posts') || []).some(x => x.id === id)) return;
+            state.editingAgendaId = id; render();
+        }
+        function cancelAgendaEdit() { state.editingAgendaId = null; render(); }
+        async function deleteAgendaPost(encodedId) {
+            if (!isProf() && !isAdmin()) return alert('Action réservée aux professeurs et aux administrateurs.');
+            const id = decodeURIComponent(encodedId);
+            if (!confirm('Supprimer cette publication de l’agenda ?')) return;
+            await DB.set('agenda_posts', (DB.get('agenda_posts') || []).filter(x => x.id !== id));
+            if (state.editingAgendaId === id) state.editingAgendaId = null;
+            showToast('Publication supprimée', 'La publication a été retirée de l’agenda.'); render();
+        }
+
         function renderTeacher() {
             if (!isProf()) return renderBlockedSection('Accès refusé', 'Cette rubrique est réservée aux professeurs.');
-            const tabs = [['fiches','Fiches de révision','book-bookmark'],['quizzes','Quiz','circle-question'],['exams','Sujets Bac','file-pdf'],['crosswords','Mots croisés','puzzle-piece'],['points','Points élèves','star']];
+            const tabs = [['agenda','Agenda','calendar-days'],['fiches','Fiches de révision','book-bookmark'],['quizzes','Quiz','circle-question'],['exams','Sujets Bac','file-pdf'],['crosswords','Mots croisés','puzzle-piece'],['points','Points élèves','star']];
             let content = '';
-            if (state.teacherSub === 'fiches') {
+            if (state.teacherSub === 'agenda') {
+                content = renderAgendaManager();
+            } else if (state.teacherSub === 'fiches') {
                 const sheets = DB.get('revision_sheets') || [];
                 content = `<div class="dyn-card border p-6 rounded-3xl space-y-4"><h3 class="font-bold text-amber-300">Créer et gérer les fiches de révision</h3><form onsubmit="adminAddRevisionLink(event)" class="space-y-3 p-4 bg-stone-900/80 rounded-2xl border"><input id="rev-title" required placeholder="Titre de la fiche" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><input id="rev-subject" required placeholder="Matière" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><input id="rev-url" type="url" required placeholder="Lien du document (https://...)" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><button class="w-full py-2.5 dyn-btn text-white font-bold rounded-xl">Publier la fiche</button></form><div class="space-y-2"><h4 class="font-bold text-amber-300">Fiches publiées</h4>${sheets.map((x,i)=>`<div class="p-3 bg-stone-900 border rounded-xl flex flex-wrap justify-between gap-2"><div><b>${escapeHtml(x.title)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(x.subject || '')}</p></div><div class="flex gap-2"><button onclick="adminEditRevisionSheet(${i})" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">Modifier</button><button onclick="adminToggleRevisionSheet(${i})" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">${x.hidden?'Afficher':'Masquer'}</button><button onclick="adminDeleteRevisionSheet(${i})" class="px-3 py-1.5 bg-red-900/60 text-red-200 rounded-lg">Supprimer</button></div></div>`).join('') || '<p class="text-amber-200/50">Aucune fiche publiée.</p>'}</div></div>`;
             } else if (state.teacherSub === 'quizzes' || state.teacherSub === 'crosswords') {
@@ -3360,6 +3571,8 @@
                             ${adminNavBtn('download_mgmt', 'Gestion App', 'download')}
                             ${adminNavBtn('export', 'Export Excel', 'file-excel')}
                             ${adminNavBtn('qrcode', 'QR Code', 'qrcode')}
+                            ${adminNavBtn('countdown', 'Compte à rebours', 'hourglass-half')}
+                            ${adminNavBtn('agenda', 'Agenda & publications', 'calendar-days')}
                         </div>
                     </div>
 
@@ -4075,6 +4288,42 @@
                         </div>
                     </div>
                 `;
+            }
+
+            if (state.adminSub === 'countdown') {
+                const countdown = DB.get('countdown');
+                const configured = !!(countdown && countdown.adminCreated && countdown.title && countdown.date);
+                return `
+                    <div class="dyn-card border p-6 rounded-3xl space-y-5">
+                        <div>
+                            <h3 class="font-bold text-amber-300 text-sm"><i class="fa-solid fa-hourglass-half mr-2"></i>Gestion du compte à rebours</h3>
+                            <p class="text-[11px] text-amber-200/60 mt-1">Le compte à rebours sera affiché sur la page d’accueil pour tous les utilisateurs et se mettra à jour automatiquement.</p>
+                        </div>
+                        <form onsubmit="adminSaveCountdown(event)" class="space-y-3 p-4 bg-stone-900/80 rounded-2xl border">
+                            <div>
+                                <label for="countdown-title" class="block text-amber-200 font-bold mb-1">Titre de l’événement</label>
+                                <input id="countdown-title" type="text" maxlength="100" required value="${configured ? escapeHtml(countdown.title) : ''}" placeholder="Ex. Épreuves du Bac Pro" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100">
+                            </div>
+                            <div>
+                                <label for="countdown-date" class="block text-amber-200 font-bold mb-1">Date de l’événement</label>
+                                <input id="countdown-date" type="date" required value="${configured ? escapeHtml(String(countdown.date).slice(0,10)) : ''}" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100">
+                            </div>
+                            <button type="submit" class="w-full py-2.5 dyn-btn text-white font-bold rounded-xl"><i class="fa-solid fa-floppy-disk mr-2"></i>${configured ? 'Mettre à jour le compte à rebours' : 'Créer le compte à rebours'}</button>
+                        </form>
+                        <div class="p-4 bg-stone-900/70 border rounded-2xl">
+                            <h4 class="text-amber-300 font-bold mb-2">État actuel</h4>
+                            ${configured ? `
+                                <p class="text-amber-100 font-bold">${escapeHtml(countdown.title)}</p>
+                                <p class="text-[11px] text-amber-200/60 mt-1">Date : ${new Date(countdown.date + 'T00:00:00').toLocaleDateString('fr-FR')}</p>
+                                <button type="button" onclick="adminDeleteCountdown()" class="mt-3 px-3 py-2 bg-red-900/50 border border-red-500/30 text-red-200 rounded-xl font-bold"><i class="fa-solid fa-trash mr-1"></i> Supprimer le compte à rebours</button>
+                            ` : '<p class="text-amber-200/60 text-xs">Aucun compte à rebours enregistré. La page d’accueil affichera « Aucun compte à rebours ».</p>'}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (state.adminSub === 'agenda') {
+                return renderAgendaManager();
             }
 
             if (state.adminSub === 'qrcode') {
