@@ -3511,16 +3511,184 @@
             showToast('Publication supprimée', 'La publication a été retirée de l’agenda.'); render();
         }
 
+        // ---- Suivi de progression : profs = leur classe ; admin = toutes les classes (lecture seule, calculé à partir des quiz) ----
+        function progressParseDate(str) {
+            const m = String(str || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (!m) return null;
+            const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+            return isNaN(d.getTime()) ? null : d;
+        }
+        function progressWeekStart(d) {
+            const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+            return x;
+        }
+        function progressFmtDay(d) { return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); }
+        function progressAvg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
+        function progressSetFilter(key, value) {
+            state.progress = state.progress || { cls: '', student: '', subject: '' };
+            state.progress[key] = value;
+            if (key === 'cls') state.progress.student = '';
+            render();
+        }
+        function progressBar(pct) {
+            const v = Math.max(0, Math.min(100, Math.round(pct)));
+            const color = v >= 70 ? 'bg-green-500' : v >= 50 ? 'bg-amber-500' : 'bg-red-500';
+            return `<div class="w-full bg-stone-950 h-2 rounded-full overflow-hidden border border-amber-900/30"><div class="${color} h-full" style="width: ${v}%"></div></div>`;
+        }
+        function progressTrend(dated) {
+            if (dated.length < 4) return '<span class="text-amber-200/40">–</span>';
+            const sorted = dated.slice().sort((a, b) => a.date - b.date);
+            const half = Math.floor(sorted.length / 2);
+            const delta = progressAvg(sorted.slice(sorted.length - half).map(r => r.pct)) - progressAvg(sorted.slice(0, half).map(r => r.pct));
+            if (delta > 5) return `<span class="text-green-400 font-bold">▲ +${Math.round(delta)} pts</span>`;
+            if (delta < -5) return `<span class="text-red-400 font-bold">▼ ${Math.round(delta)} pts</span>`;
+            return '<span class="text-amber-200/70 font-bold">► stable</span>';
+        }
+        function progressLineChart(points) {
+            if (points.length < 2) return '<p class="text-amber-200/50 italic">Pas assez de données datées pour tracer une évolution (il faut des quiz réalisés sur au moins 2 semaines différentes).</p>';
+            const W = 640, H = 230, L = 38, R = 14, T = 14, B = 40;
+            const x = i => L + i * (W - L - R) / (points.length - 1);
+            const y = v => T + (100 - v) * (H - T - B) / 100;
+            let svg = `<svg viewBox="0 0 ${W} ${H}" class="w-full" role="img" aria-label="Évolution de la moyenne en pourcentage">`;
+            [0, 25, 50, 75, 100].forEach(g => {
+                svg += `<line x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}" stroke="#78716c" stroke-opacity="0.35" stroke-dasharray="3 4"/>`;
+                svg += `<text x="${L - 6}" y="${y(g) + 3}" font-size="10" text-anchor="end" fill="#d6d3d1">${g}%</text>`;
+            });
+            svg += `<polyline fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round" points="${points.map((p, i) => x(i).toFixed(1) + ',' + y(p.value).toFixed(1)).join(' ')}"/>`;
+            const every = Math.ceil(points.length / 8);
+            points.forEach((p, i) => {
+                svg += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="#f59e0b"><title>${escapeHtml(p.label)} : ${Math.round(p.value)} % (${p.n} résultat(s))</title></circle>`;
+                if (i % every === 0 || i === points.length - 1) svg += `<text x="${x(i).toFixed(1)}" y="${H - 16}" font-size="10" text-anchor="middle" fill="#d6d3d1">${escapeHtml(p.label)}</text>`;
+            });
+            return svg + '</svg>';
+        }
+        function renderProgressSection() {
+            const me = getCurrentUser();
+            if (!me || !(isAdmin(me) || isProf(me))) return renderBlockedSection('Accès refusé', 'Cette rubrique est réservée aux professeurs et aux administrateurs.');
+            state.progress = state.progress || { cls: '', student: '', subject: '' };
+            const f = state.progress;
+            const clsOf = u => String(u.className || u.class || '').trim();
+            const allStudents = (DB.get('users') || []).filter(u => u.role === 'student');
+            const admin = isAdmin(me);
+            let scope, classPicker = '', scopeLabel = '';
+            if (admin) {
+                const classes = Array.from(new Set(allStudents.map(clsOf).filter(Boolean))).sort();
+                if (f.cls === '__none') scope = allStudents.filter(u => !clsOf(u));
+                else if (f.cls && classes.includes(f.cls)) scope = allStudents.filter(u => clsOf(u) === f.cls);
+                else { f.cls = ''; scope = allStudents; }
+                scopeLabel = f.cls === '__none' ? 'Élèves sans classe' : (f.cls || 'Toutes les classes');
+                classPicker = `<div><label class="block font-bold text-amber-200 mb-1">Classe :</label><select onchange="progressSetFilter('cls', this.value)" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100 font-bold"><option value="">Toutes les classes</option>${classes.map(c => `<option value="${escapeHtml(c)}" ${f.cls === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}<option value="__none" ${f.cls === '__none' ? 'selected' : ''}>Sans classe</option></select></div>`;
+            } else {
+                const mine = clsOf(me);
+                if (!mine) return '<div class="dyn-card border p-6 rounded-3xl"><p class="text-orange-300">Aucune classe n’est associée à ce compte professeur. Demande à l’administrateur de renseigner ta classe dans la gestion des comptes.</p></div>';
+                scope = allStudents.filter(u => clsOf(u) === mine);
+                scopeLabel = 'Classe ' + mine;
+            }
+            scope = scope.slice().sort((a, b) => String(a.realName || a.pseudo || a.username).localeCompare(String(b.realName || b.pseudo || b.username), 'fr'));
+            const nameOf = u => u.realName || u.pseudo || u.username;
+            const student = f.student ? scope.find(u => u.username === f.student) : null;
+            if (f.student && !student) f.student = '';
+            const people = student ? [student] : scope;
+
+            const quizzes = DB.get('quizzes') || [];
+            const subs = DB.get('quiz_submissions') || {};
+            const scores = DB.get('user_scores') || {};
+            const cw = DB.get('crosswords_submissions') || {};
+            const subjLabel = s => String(s || '').trim() || 'Général';
+            const keyOf = s => subjLabel(s).toLowerCase();
+            const quizMap = {}; quizzes.forEach(q => { quizMap[q.id] = q; });
+            const subjectMap = {}; quizzes.forEach(q => { if (!subjectMap[keyOf(q.subject)]) subjectMap[keyOf(q.subject)] = subjLabel(q.subject); });
+            const subjectKeys = Object.keys(subjectMap).sort((a, b) => subjectMap[a].localeCompare(subjectMap[b], 'fr'));
+            if (f.subject && !subjectMap[f.subject]) f.subject = '';
+
+            const resultsOf = u => {
+                const mine = subs[u.username] || {}, out = [];
+                Object.keys(mine).forEach(qid => {
+                    const r = mine[qid], q = quizMap[qid];
+                    if (!r || !q) return;
+                    const total = Number(r.total) || (q.questions || []).length;
+                    if (!total) return;
+                    const score = Number(r.score) || 0;
+                    out.push({ username: u.username, title: q.title, subject: subjLabel(q.subject), skey: keyOf(q.subject), score, total, pct: Math.min(100, score / total * 100), dateStr: r.date || '', date: progressParseDate(r.date) });
+                });
+                return out;
+            };
+            let results = [];
+            people.forEach(u => { results = results.concat(resultsOf(u)); });
+            const filtered = f.subject ? results.filter(r => r.skey === f.subject) : results;
+
+            // Synthèse
+            const availQuizzes = quizzes.filter(q => !q.hidden && (!f.subject || keyOf(q.subject) === f.subject)).length;
+            const possible = availQuizzes * people.length;
+            const participation = possible ? Math.min(100, filtered.length / possible * 100) : 0;
+            const globalAvg = progressAvg(filtered.map(r => r.pct));
+            const card = (label, value, extra) => `<div class="p-4 bg-stone-900 border rounded-2xl"><p class="text-[10px] text-amber-200/60 uppercase font-bold">${label}</p><p class="text-2xl font-black text-amber-300 mt-1">${value}</p>${extra || ''}</div>`;
+            const summary = `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">${card('Élèves suivis', people.length)}${card('Quiz réalisés', filtered.length)}${card('Moyenne', filtered.length ? Math.round(globalAvg) + ' %' : '–', filtered.length ? progressBar(globalAvg) : '')}${card('Participation', possible ? Math.round(participation) + ' %' : '–', possible ? progressBar(participation) : '')}</div>`;
+
+            // Par matière
+            const subjRows = subjectKeys.map(k => {
+                const rs = results.filter(r => r.skey === k);
+                const avail = quizzes.filter(q => !q.hidden && keyOf(q.subject) === k).length;
+                const poss = avail * people.length;
+                const part = poss ? Math.min(100, rs.length / poss * 100) : 0;
+                const avg = progressAvg(rs.map(r => r.pct));
+                return `<tr class="border-t border-amber-900/30 ${f.subject === k ? 'bg-amber-500/10' : ''}"><td class="p-2 font-bold text-amber-100"><button type="button" onclick="progressSetFilter('subject', '${jsAttr(f.subject === k ? '' : k)}')" class="underline decoration-dotted text-left">${escapeHtml(subjectMap[k])}</button></td><td class="p-2 w-40">${rs.length ? `<div class="flex items-center gap-2"><span class="font-black text-amber-300 w-10">${Math.round(avg)} %</span>${progressBar(avg)}</div>` : '<span class="text-amber-200/40">Aucun résultat</span>'}</td><td class="p-2 text-amber-200/80">${rs.length} / ${poss}</td><td class="p-2 text-amber-200/80">${poss ? Math.round(part) + ' %' : '–'}</td></tr>`;
+            }).join('');
+            const subjectTable = subjectKeys.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><thead><tr class="text-[10px] uppercase text-amber-200/60"><th class="p-2">Matière</th><th class="p-2">Moyenne</th><th class="p-2">Quiz faits / possibles</th><th class="p-2">Participation</th></tr></thead><tbody>${subjRows}</tbody></table></div>` : '<p class="text-amber-200/50 italic">Aucun quiz n’a encore été créé.</p>';
+
+            // Évolution (moyenne par semaine, dernière tentative de chaque quiz)
+            const weeks = {};
+            filtered.filter(r => r.date).forEach(r => { const k = progressWeekStart(r.date).getTime(); (weeks[k] = weeks[k] || []).push(r.pct); });
+            const points = Object.keys(weeks).map(Number).sort((a, b) => a - b).map(k => ({ label: 'Sem. ' + progressFmtDay(new Date(k)), value: progressAvg(weeks[k]), n: weeks[k].length }));
+
+            // Détail élève ou tableau de classe
+            let detail;
+            if (student) {
+                const rows = filtered.slice().sort((a, b) => (b.date ? b.date.getTime() : 0) - (a.date ? a.date.getTime() : 0));
+                detail = `<h4 class="font-bold text-amber-300">Résultats de ${escapeHtml(nameOf(student))}</h4>` + (rows.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><thead><tr class="text-[10px] uppercase text-amber-200/60"><th class="p-2">Quiz</th><th class="p-2">Matière</th><th class="p-2">Date</th><th class="p-2">Score</th><th class="p-2 w-40">Réussite</th></tr></thead><tbody>${rows.map(r => `<tr class="border-t border-amber-900/30"><td class="p-2 font-bold text-amber-100">${escapeHtml(r.title)}</td><td class="p-2 text-amber-200/80">${escapeHtml(r.subject)}</td><td class="p-2 text-amber-200/80">${escapeHtml(r.dateStr || '–')}</td><td class="p-2 text-amber-200/80">${r.score} / ${r.total}</td><td class="p-2"><div class="flex items-center gap-2"><span class="font-black text-amber-300 w-10">${Math.round(r.pct)} %</span>${progressBar(r.pct)}</div></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-amber-200/50 italic">Cet élève n’a pas encore fait de quiz' + (f.subject ? ' dans cette matière' : '') + '.</p>');
+                const pts = parseFloat(scores[student.username]) || 0, nbCw = Object.keys(cw[student.username] || {}).length;
+                detail += `<p class="text-amber-200/70">Points au classement : <b class="text-amber-300">${pts}</b> · Grilles de mots croisés faites : <b class="text-amber-300">${nbCw}</b></p>`;
+            } else {
+                const rows = scope.map(u => {
+                    const rs = resultsOf(u).filter(r => !f.subject || r.skey === f.subject);
+                    const avg = progressAvg(rs.map(r => r.pct));
+                    const dated = rs.filter(r => r.date);
+                    const last = dated.length ? new Date(Math.max.apply(null, dated.map(r => r.date.getTime()))) : null;
+                    const pts = parseFloat(scores[u.username]) || 0, nbCw = Object.keys(cw[u.username] || {}).length;
+                    return `<tr class="border-t border-amber-900/30"><td class="p-2 font-bold text-amber-100"><button type="button" onclick="progressSetFilter('student', '${jsAttr(u.username)}')" class="underline decoration-dotted text-left">${escapeHtml(nameOf(u))}</button></td><td class="p-2 text-amber-200/80">${rs.length}</td><td class="p-2 w-40">${rs.length ? `<div class="flex items-center gap-2"><span class="font-black ${avg < 50 ? 'text-red-400' : 'text-amber-300'} w-10">${Math.round(avg)} %</span>${progressBar(avg)}</div>` : '<span class="text-orange-300">Aucun quiz</span>'}</td><td class="p-2">${progressTrend(dated)}</td><td class="p-2 text-amber-200/80">${last ? escapeHtml(last.toLocaleDateString('fr-FR')) : '–'}</td><td class="p-2 text-amber-200/80">${pts}</td><td class="p-2 text-amber-200/80">${nbCw}</td></tr>`;
+                }).join('');
+                detail = `<h4 class="font-bold text-amber-300">Élève par élève</h4>` + (scope.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><thead><tr class="text-[10px] uppercase text-amber-200/60"><th class="p-2">Élève</th><th class="p-2">Quiz faits</th><th class="p-2">Moyenne</th><th class="p-2">Évolution</th><th class="p-2">Dernier quiz</th><th class="p-2">Points</th><th class="p-2">Mots croisés</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="text-amber-200/50 italic">Aucun élève dans ce groupe.</p>');
+            }
+
+            const studentPicker = `<div><label class="block font-bold text-amber-200 mb-1">Élève :</label><select onchange="progressSetFilter('student', this.value)" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100 font-bold"><option value="">Toute la classe</option>${scope.map(u => `<option value="${escapeHtml(u.username)}" ${f.student === u.username ? 'selected' : ''}>${escapeHtml(nameOf(u))}</option>`).join('')}</select></div>`;
+            const subjectPicker = `<div><label class="block font-bold text-amber-200 mb-1">Matière :</label><select onchange="progressSetFilter('subject', this.value)" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100 font-bold"><option value="">Toutes les matières</option>${subjectKeys.map(k => `<option value="${escapeHtml(k)}" ${f.subject === k ? 'selected' : ''}>${escapeHtml(subjectMap[k])}</option>`).join('')}</select></div>`;
+
+            return `<div class="space-y-4">
+                <div class="dyn-card border p-6 rounded-3xl space-y-4">
+                    <h3 class="font-bold text-amber-300 text-sm"><i class="fa-solid fa-chart-line mr-2"></i>Progression — ${escapeHtml(scopeLabel)}${student ? ' · ' + escapeHtml(nameOf(student)) : ''}</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">${classPicker}${studentPicker}${subjectPicker}</div>
+                    ${summary}
+                    <p class="text-[10px] text-amber-200/50">Calculé à partir de la dernière tentative de chaque quiz. La participation compare les quiz réalisés aux quiz publiés.</p>
+                </div>
+                <div class="dyn-card border p-6 rounded-3xl space-y-3"><h4 class="font-bold text-amber-300">Évolution de la moyenne (par semaine)${f.subject ? ' — ' + escapeHtml(subjectMap[f.subject]) : ''}</h4>${progressLineChart(points)}</div>
+                <div class="dyn-card border p-6 rounded-3xl space-y-3"><h4 class="font-bold text-amber-300">Résultats par matière</h4>${subjectTable}</div>
+                <div class="dyn-card border p-6 rounded-3xl space-y-3">${detail}</div>
+            </div>`;
+        }
+
         function renderTeacher() {
             if (!isProf()) return renderBlockedSection('Accès refusé', 'Cette rubrique est réservée aux professeurs.');
-            const tabs = [['agenda','Agenda','calendar-days'],['fiches','Fiches de révision','book-bookmark'],['quizzes','Quiz','circle-question'],['exams','Sujets Bac','file-pdf'],['crosswords','Mots croisés','puzzle-piece'],['points','Points élèves','star']];
+            const tabs = [['agenda','Agenda','calendar-days'],['fiches','Fiches de révision','book-bookmark'],['quizzes','Quiz','circle-question'],['exams','Sujets Bac','file-pdf'],['crosswords','Mots croisés','puzzle-piece'],['points','Points élèves','star'],['formations','Formations post-bac','graduation-cap'],['progress','Progression','chart-line']];
             let content = '';
-            if (state.teacherSub === 'agenda') {
+            if (state.teacherSub === 'progress') {
+                content = renderProgressSection();
+            } else if (state.teacherSub === 'agenda') {
                 content = renderAgendaManager();
             } else if (state.teacherSub === 'fiches') {
                 const sheets = DB.get('revision_sheets') || [];
                 content = `<div class="dyn-card border p-6 rounded-3xl space-y-4"><h3 class="font-bold text-amber-300">Créer et gérer les fiches de révision</h3><form onsubmit="adminAddRevisionLink(event)" class="space-y-3 p-4 bg-stone-900/80 rounded-2xl border"><input id="rev-title" required placeholder="Titre de la fiche" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><input id="rev-subject" required placeholder="Matière" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><input id="rev-url" type="url" required placeholder="Lien du document (https://...)" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><button class="w-full py-2.5 dyn-btn text-white font-bold rounded-xl">Publier la fiche</button></form><div class="space-y-2"><h4 class="font-bold text-amber-300">Fiches publiées</h4>${sheets.map((x,i)=>`<div class="p-3 bg-stone-900 border rounded-xl flex flex-wrap justify-between gap-2"><div><b>${escapeHtml(x.title)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(x.subject || '')}</p></div><div class="flex gap-2"><button onclick="adminEditRevisionSheet(${i})" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">Modifier</button><button onclick="adminToggleRevisionSheet(${i})" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">${x.hidden?'Afficher':'Masquer'}</button><button onclick="adminDeleteRevisionSheet(${i})" class="px-3 py-1.5 bg-red-900/60 text-red-200 rounded-lg">Supprimer</button></div></div>`).join('') || '<p class="text-amber-200/50">Aucune fiche publiée.</p>'}</div></div>`;
-            } else if (state.teacherSub === 'quizzes' || state.teacherSub === 'crosswords') {
+            } else if (state.teacherSub === 'quizzes' || state.teacherSub === 'crosswords' || state.teacherSub === 'formations') {
                 const previous = state.adminSub;
                 state.adminSub = state.teacherSub;
                 content = renderAdminSubSection(DB.get('users') || [], DB.get('messages') || [], DB.get('appreciations') || {});
@@ -3578,6 +3746,7 @@
                             ${adminNavBtn('quest_validation', 'Validation Points', 'check-to-slot')}
                             ${adminNavBtn('crosswords', 'Mots Croisés', 'puzzle-piece')}
                             ${adminNavBtn('quizzes', 'Création Quiz', 'circle-question')}
+                            ${adminNavBtn('progress', 'Progression', 'chart-line')}
                             ${adminNavBtn('appreciations', 'Appréciations', 'file-signature')}
                             ${adminNavBtn('pubs', 'Publications', 'file-pdf')}
                             ${adminNavBtn('cvl', 'CVL', 'landmark')}
@@ -3604,6 +3773,7 @@
         }
 
         function renderAdminSubSection(users, msgs, apps) {
+            if (state.adminSub === 'progress') return renderProgressSection();
             if (state.adminSub === 'users') {
                 return `
                     <div class="dyn-card border p-6 rounded-3xl space-y-4">
@@ -4085,6 +4255,15 @@
                                 </div>
                             </div>
 
+                            <div class="p-3 bg-stone-950/60 rounded-2xl border border-dashed border-amber-900/50 space-y-2">
+                                <label class="block font-bold text-amber-200">Importer les questions depuis un fichier (facultatif) :</label>
+                                <p class="text-[10px] text-amber-200/60">Fichier .xlsx, .xls, .ods, .csv ou .txt, une question par ligne, colonnes : Question ; Option A ; Option B ; Option C ; Option D ; Bonne réponse (A, B, C ou D). Les questions remplissent le formulaire ci-dessous : vérifiez-les, puis cliquez sur « Publier le Quiz ».</p>
+                                <div class="flex flex-wrap gap-2 items-center">
+                                    <input type="file" id="quiz-import-file" accept=".xlsx,.xls,.ods,.csv,.txt" onchange="adminImportQuizFile(this)" class="text-[11px] text-amber-200">
+                                    <button type="button" onclick="adminDownloadQuizTemplate()" class="px-3 py-1.5 bg-stone-800 text-amber-300 font-bold rounded-xl text-[11px]"><i class="fa-solid fa-download mr-1"></i> Télécharger le modèle</button>
+                                </div>
+                            </div>
+
                             <div id="quiz-questions-builder" class="space-y-4 pt-2">
                                 <div class="p-4 bg-stone-950/80 rounded-2xl border space-y-3 quiz-q-block">
                                     <h4 class="font-bold text-amber-400 text-xs">Question 1</h4>
@@ -4235,6 +4414,15 @@
                             <input type="url" id="form-link" placeholder="Lien d'information URL (optionnel)..." class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100">
                             <button type="submit" class="w-full py-2.5 dyn-btn text-white font-bold rounded-xl">Publier la Formation</button>
                         </form>
+
+                        <div class="p-3 bg-stone-950/60 rounded-2xl border border-dashed border-amber-900/50 space-y-2">
+                            <label class="block font-bold text-amber-200">Ou importer plusieurs formations depuis un fichier :</label>
+                            <p class="text-[10px] text-amber-200/60">Fichier .xlsx, .xls, .ods, .csv ou .txt, une formation par ligne, colonnes : Intitulé ; Description ; Lien (facultatif). Un récapitulatif vous est demandé avant la publication. Les formations déjà publiées avec le même intitulé sont ignorées.</p>
+                            <div class="flex flex-wrap gap-2 items-center">
+                                <input type="file" id="formations-import-file" accept=".xlsx,.xls,.ods,.csv,.txt" onchange="adminImportFormationsFile(this)" class="text-[11px] text-amber-200">
+                                <button type="button" onclick="adminDownloadFormationsTemplate()" class="px-3 py-1.5 bg-stone-800 text-amber-300 font-bold rounded-xl text-[11px]"><i class="fa-solid fa-download mr-1"></i> Télécharger le modèle</button>
+                            </div>
+                        </div>
 
                         <div class="space-y-3 pt-4 border-t border-amber-900/40">
                             <h4 class="font-bold text-amber-300 text-sm">Formations publiées</h4>
@@ -4909,6 +5097,85 @@
             container.appendChild(div);
         }
 
+        // ---- Import de questions de quiz depuis un fichier (xlsx, xls, ods, csv, txt) ----
+        // Colonnes : Question | Option A | Option B | Option C | Option D | Bonne réponse (A-D ou 1-4)
+        function quizRowsToQuestions(rows) {
+            const questions = [], errors = [];
+            let start = 0;
+            if (rows.length && /question|intitul/i.test(String(rows[0][0] ?? ''))) start = 1;
+            for (let i = start; i < rows.length; i++) {
+                const r = rows[i].map(c => String(c ?? '').trim());
+                if (r.every(c => c === '')) continue;
+                const line = i + 1;
+                const text = r[0];
+                const rawOpts = [r[1], r[2], r[3], r[4]];
+                const options = rawOpts.filter(o => o !== '');
+                if (!text) { errors.push('Ligne ' + line + ' : question vide'); continue; }
+                if (options.length < 2) { errors.push('Ligne ' + line + ' : il faut au moins 2 options'); continue; }
+                const ans = (r[5] || '').trim();
+                let pos = -1; // position dans les 4 colonnes d'origine
+                const m = ans.match(/^(?:option\s*)?([a-d1-4])$/i);
+                if (m) { const ch = m[1].toUpperCase(); pos = /[1-4]/.test(ch) ? parseInt(ch, 10) - 1 : ch.charCodeAt(0) - 65; }
+                else if (ans) pos = rawOpts.findIndex(o => o !== '' && o.toLowerCase() === ans.toLowerCase());
+                if (pos < 0 || rawOpts[pos] === '') { errors.push('Ligne ' + line + ' : bonne réponse introuvable (« ' + ans + ' »)'); continue; }
+                const correct = options.indexOf(rawOpts[pos]);
+                questions.push({ text, options, correct });
+            }
+            return { questions, errors };
+        }
+
+        async function adminImportQuizFile(input) {
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
+            const file = input.files && input.files[0];
+            if (!file) return;
+            const container = document.getElementById('quiz-questions-builder');
+            if (!container) return;
+            try {
+                if (file.size > 2 * 1024 * 1024) throw new Error('Fichier trop volumineux (2 Mo maximum).');
+                const isText = /\.(csv|txt)$/i.test(file.name);
+                const wb = isText
+                    ? XLSX.read((await file.text()).replace(/^\ufeff/, ''), { type: 'string' })
+                    : XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                if (!ws) throw new Error('Le fichier est vide.');
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+                const { questions, errors } = quizRowsToQuestions(rows);
+                if (!questions.length) throw new Error('Aucune question valide trouvée.' + (errors.length ? '\n' + errors.slice(0, 5).join('\n') : ''));
+                const used = Array.from(container.querySelectorAll('.q-text')).some(el => el.value.trim());
+                if (used && !confirm('Remplacer les questions déjà saisies par les ' + questions.length + ' questions du fichier ?')) { input.value = ''; return; }
+                const kept = questions.slice(0, 100);
+                container.innerHTML = '';
+                kept.forEach(q => {
+                    addAdminQuizQuestionRow();
+                    const b = container.lastElementChild;
+                    b.querySelector('.q-text').value = q.text;
+                    q.options.forEach((o, k) => { b.querySelector('.q-opt-' + k).value = o; });
+                    b.querySelector('.q-correct').value = String(q.correct);
+                });
+                let msg = kept.length + ' question(s) importée(s). Vérifiez-les puis publiez le quiz.';
+                if (questions.length > 100) msg += '\nSeules les 100 premières ont été gardées.';
+                if (errors.length) msg += '\n\nLignes ignorées :\n' + errors.slice(0, 8).join('\n') + (errors.length > 8 ? '\n… (' + (errors.length - 8) + ' autres)' : '');
+                alert(msg);
+            } catch (err) {
+                alert('Import impossible : ' + (err && err.message ? err.message : err));
+            }
+            input.value = '';
+        }
+
+        function adminDownloadQuizTemplate() {
+            const rows = [
+                ['Question', 'Option A', 'Option B', 'Option C', 'Option D', 'Bonne réponse'],
+                ['Quelle est la capitale de la France ?', 'Lyon', 'Paris', 'Marseille', 'Lille', 'B'],
+                ['2 + 2 = ?', '3', '4', '5', '', 'B']
+            ];
+            const csv = '\ufeff' + rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            a.download = 'modele-quiz.csv';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+
         async function adminCreateQuiz(e) {
             if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
             e.preventDefault();
@@ -5090,8 +5357,78 @@
             render();
         }
 
+        // ---- Import de formations post-bac depuis un fichier (xlsx, xls, ods, csv, txt) ----
+        // Colonnes : Intitulé | Description | Lien (facultatif)
+        function formationRowsToItems(rows, existingTitles) {
+            const items = [], errors = [], seen = new Set((existingTitles || []).map(t => String(t || '').trim().toLowerCase()));
+            let start = 0;
+            if (rows.length && /intitul|formation|titre/i.test(String(rows[0][0] ?? ''))) start = 1;
+            for (let i = start; i < rows.length; i++) {
+                const r = rows[i].map(c => String(c ?? '').trim());
+                if (r.every(c => c === '')) continue;
+                const line = i + 1;
+                const title = r[0].slice(0, 200);
+                if (!title) { errors.push('Ligne ' + line + ' : intitulé vide'); continue; }
+                if (seen.has(title.toLowerCase())) { errors.push('Ligne ' + line + ' : « ' + title + ' » existe déjà ou est en double'); continue; }
+                let link = r[2] || '';
+                if (link && !/^[a-z][a-z0-9+.-]*:/i.test(link) && /^[\w-]+(\.[\w-]+)+(\/|$|\?|#)/.test(link)) link = 'https://' + link;
+                if (link) { link = safeHttpUrl(link); if (!link) { errors.push('Ligne ' + line + ' : lien invalide pour « ' + title + ' »'); continue; } }
+                seen.add(title.toLowerCase());
+                items.push({ title, description: (r[1] || '').slice(0, 3000), link });
+            }
+            return { items, errors };
+        }
+
+        async function adminImportFormationsFile(input) {
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
+            const file = input.files && input.files[0];
+            if (!file) return;
+            try {
+                if (file.size > 2 * 1024 * 1024) throw new Error('Fichier trop volumineux (2 Mo maximum).');
+                const isText = /\.(csv|txt)$/i.test(file.name);
+                const wb = isText
+                    ? XLSX.read((await file.text()).replace(/^\ufeff/, ''), { type: 'string' })
+                    : XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                if (!ws) throw new Error('Le fichier est vide.');
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+                let formations = DB.get('formations') || [];
+                const { items, errors } = formationRowsToItems(rows, formations.map(f => f.title));
+                if (!items.length) throw new Error('Aucune formation à importer.' + (errors.length ? '\n' + errors.slice(0, 6).join('\n') : ''));
+                const kept = items.slice(0, 200);
+                let msg = 'Publier ' + kept.length + ' formation(s) ?\n\n' + kept.slice(0, 8).map(f => '• ' + f.title).join('\n') + (kept.length > 8 ? '\n… et ' + (kept.length - 8) + ' autre(s)' : '');
+                if (items.length > 200) msg += '\n\nSeules les 200 premières seront gardées.';
+                if (errors.length) msg += '\n\nLignes ignorées :\n' + errors.slice(0, 6).join('\n') + (errors.length > 6 ? '\n… (' + (errors.length - 6) + ' autres)' : '');
+                if (!confirm(msg)) { input.value = ''; return; }
+                const stamp = Date.now();
+                formations = kept.map((f, i) => ({ id: 'form_' + stamp + '_' + i, title: f.title, description: f.description, link: f.link, hidden: false })).concat(formations);
+                await DB.set('formations', formations);
+                pushGlobalNotification("🎓 Nouvelles formations", kept.length + ' formation(s) post-bac ont été ajoutées par l’équipe pédagogique.');
+                showToast("Formations publiées !", kept.length + ' formation(s) ajoutée(s).');
+                render();
+            } catch (err) {
+                alert('Import impossible : ' + (err && err.message ? err.message : err));
+            }
+            input.value = '';
+        }
+
+        function adminDownloadFormationsTemplate() {
+            const rows = [
+                ['Intitulé', 'Description', 'Lien (facultatif)'],
+                ['BTS Management Commercial Opérationnel', 'Formation en 2 ans après le bac, orientée gestion de la relation client et de l’unité commerciale.', 'https://www.onisep.fr'],
+                ['BUT Techniques de commercialisation', 'Formation en 3 ans en IUT, alternance possible.', '']
+            ];
+            const csv = '\ufeff' + rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            a.download = 'modele-formations.csv';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+
         async function adminAddFormationLink(e) {
             e.preventDefault();
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
             let tEl = document.getElementById('form-title');
             let dEl = document.getElementById('form-desc');
             let lEl = document.getElementById('form-link');
@@ -5108,6 +5445,7 @@
         }
 
         async function adminToggleHideFormation(formId) {
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
             let formations = DB.get('formations') || [];
             let f = formations.find(x => x.id === formId);
             if (f) {
@@ -5119,6 +5457,7 @@
         }
 
         async function adminDeleteFormation(formId) {
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
             if (!confirm("Voulez-vous supprimer cette formation ?")) return;
             let formations = DB.get('formations') || [];
             let updated = formations.filter(x => x.id !== formId);
