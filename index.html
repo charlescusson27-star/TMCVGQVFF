@@ -12,6 +12,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
 
     <!-- SheetJS CDN pour l'export Excel -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -41,6 +42,38 @@
             user-select: none;
             animation: fall linear infinite;
         }
+        .cw-cell { position: relative; width: 34px; height: 34px; }
+        .cw-black { background: #1c1917; }
+        .cw-input { width: 100%; height: 100%; padding: 0; text-align: center; text-transform: uppercase; font-weight: 900; font-size: 16px; color: #1c1917; background: #fffbeb; border: 1px solid #57534e; border-radius: 0; outline: none; }
+        .cw-input.cw-hl { background: #fde68a; }
+        .cw-input:focus { background: #fcd34d; }
+        .cw-input.cw-ok { background: #bbf7d0 !important; }
+        .cw-input.cw-ko { background: #fecaca !important; }
+        .cw-num { position: absolute; top: 0; left: 2px; font-size: 9px; font-weight: 800; color: #44403c; line-height: 1; pointer-events: none; }
+
+        /* ---- Module additionnel : Salon de Noël 3D ---- */
+        .christmas-salon-card{background:radial-gradient(ellipse at 50% 0%,#315b48 0%,#10271f 45%,#090f0d 100%);border:1px solid rgba(248,205,112,.45);border-radius:28px;overflow:hidden;box-shadow:0 22px 65px #0009}
+        .christmas-salon-head{background:linear-gradient(90deg,#7f1d1d,#14532d 55%,#7f1d1d);padding:18px;color:#fff7df}
+        #christmas-3d-host{position:relative;width:100%;height:clamp(390px,62vw,680px);min-height:390px;touch-action:none;overflow:hidden;background:radial-gradient(ellipse at 50% 75%,#70452b,#1c1714 60%,#080b09)}
+        #christmas-3d-host canvas{display:block;width:100%;height:100%;touch-action:none}
+        .christmas-hint{background:#07140fe8;color:#fef3c7;border-top:1px solid #eabf6244}
+        .christmas-modal{position:fixed;inset:0;z-index:100;background:#030806ed;display:flex;align-items:center;justify-content:center;padding:12px}
+        .christmas-modal.hidden{display:none}
+        .christmas-book{width:min(920px,100%);max-height:92vh;display:flex;flex-direction:column;background:linear-gradient(135deg,#f7e8c6,#ead2a2);color:#402716;border:8px solid #6b2c1c;border-radius:18px;box-shadow:0 25px 90px #000c;overflow:hidden}
+        .christmas-book-page{min-height:330px;max-height:62vh;overflow:auto;padding:clamp(22px,5vw,58px);background:linear-gradient(90deg,#f7edda,#fff8e9 8%,#fff8e9 92%,#ead9ba);font-family:Georgia,serif;line-height:1.8;touch-action:pan-y}
+        .christmas-book-page h3{font-size:clamp(22px,4vw,34px);font-weight:900;color:#7f1d1d;margin-bottom:20px}
+        .christmas-book-page p{font-size:clamp(15px,2vw,18px);white-space:pre-line}
+        .christmas-ribbon{background:#7f1d1d;color:#fff1cf;border-radius:8px;padding:14px;margin-top:22px;border:2px dashed #f8d98a;font-weight:800}
+        .christmas-gift-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+        .christmas-gift-chip{border:1px solid #e8c77b;background:linear-gradient(145deg,#b91c1c,#7f1d1d);color:#fff7df;border-radius:10px;padding:7px 2px;font-weight:900;min-height:43px}
+        .christmas-gift-chip:disabled{filter:grayscale(.8);opacity:.45}
+        .christmas-gift-chip.available{background:linear-gradient(145deg,#15803d,#14532d);border-color:#facc15}
+        .christmas-gift-chip.today{outline:3px solid #facc15;outline-offset:1px}
+        .christmas-snow-game{position:absolute;inset:12px;z-index:4;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;align-content:center;background:#061b16eF;border:1px solid #facc15;border-radius:18px;padding:15px}
+        .christmas-snow-game button{font-size:clamp(24px,5vw,42px);padding:8px;background:#ffffff18;border-radius:14px}
+        @media(max-width:640px){#christmas-3d-host{height:480px;min-height:420px}.christmas-gift-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.christmas-book{border-width:4px}.christmas-book-page{min-height:300px}}
+        @media(prefers-reduced-motion:reduce){.christmas-salon-card *{scroll-behavior:auto!important}}
+
     </style>
 </head>
 <body id="body-theme" class="bg-stone-950 text-amber-50 h-full flex flex-col font-sans bg-cover bg-center bg-fixed relative overflow-hidden transition-all duration-500">
@@ -221,6 +254,7 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const auth = firebase.auth();
+        const christmasFunctions = firebase.app().functions('europe-west1');
         auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(() => {});
         // Seconde instance : sert uniquement à créer des comptes sans déconnecter l'admin
         const secondaryApp = firebase.initializeApp(firebaseConfig, 'secondary');
@@ -273,6 +307,7 @@
             exam_subjects: [],
             cvl_links: [],
             formations: [],
+            maintenance: { enabled: false, message: '' },
             mails: [],
             appreciations: {},
             flashcards_decks: [],
@@ -295,7 +330,9 @@
             hidden_tabs: [],
             site_theme: { preset: 'standard', btnColor: '#d97706', cardBg: 'rgba(12, 12, 12, 0.95)', borderColor: 'rgba(245, 158, 11, 0.4)', bgUrl: '' },
             countdown: null,
-            agenda_posts: []
+            agenda_posts: [],
+            christmas_salon_config: { enabled: false },
+            christmas_draws: { days: {} }
         };
 
         const DB = {
@@ -397,7 +434,7 @@
 
         function checkCGUValidation() {
             let user = getCurrentUser();
-            if (!user) return;
+            if (!user || isMaintenanceBlocked()) return;
             let cguConfig = DB.get('cgu_config') || { text: '' };
             if (!cguConfig.text || !cguConfig.text.trim()) return;
 
@@ -422,6 +459,7 @@
         }
 
         function checkBirthdays() {
+            if (isMaintenanceBlocked()) return;
             let users = DB.get('users') || [];
             let today = new Date().toISOString().slice(5, 10);
             let checkedKey = 'leqg_bday_checked_' + today;
@@ -438,7 +476,7 @@
 
         function checkWeeklyCrosswordMisses() {
             let user = getCurrentUser();
-            if (!user || user.role === 'admin') return;
+            if (!user || user.role === 'admin' || isMaintenanceBlocked()) return;
             let grids = DB.get('crosswords_grids') || [];
             if (grids.length === 0) return;
 
@@ -534,6 +572,8 @@
             if ((u.email || '').toLowerCase() !== (fb.email || '').toLowerCase()) { u.email = fb.email; delete u.pendingEmail; changed = true; }
             if (changed) await DB.set('users', users);
         }
+        // Vrai si le site est en maintenance ET que le compte connecté n'est pas administrateur
+        function isMaintenanceBlocked() { return !!myRole && myRole.role !== 'admin' && !!(DB.get('maintenance') || {}).enabled; }
         function isAdmin(user = getCurrentUser()) { return !!user && user.role === 'admin'; }
         function isProf(user = getCurrentUser()) { return !!user && user.role === 'prof'; }
         function canManageLearning(user = getCurrentUser()) { return isAdmin(user) || isProf(user); }
@@ -565,6 +605,35 @@
             } catch (err) { console.error('Chargement CVL impossible :', err); }
         }
         
+        // ---- Notifications de l'admin envoyées aussi par e-mail (service EmailJS) ----
+        // À renseigner une fois le compte EmailJS créé. Tant que c'est vide, aucun e-mail n'est envoyé.
+        const ADMIN_NOTIF_EMAIL = 'charlescusson27@gmail.com';
+        const EMAILJS_CONFIG = { publicKey: '', serviceId: '', templateId: '' };
+        function emailAdminNotification(title, message, target) {
+            try {
+                if (!EMAILJS_CONFIG.publicKey || !EMAILJS_CONFIG.serviceId || !EMAILJS_CONFIG.templateId) return;
+                const me = getCurrentUser();
+                if (!me || me.role === 'admin') return; // l'admin voit déjà ce qu'il fait lui-même
+                const admins = (DB.get('users') || []).filter(u => u.role === 'admin').map(u => u.username);
+                if (target !== 'all' && !admins.includes(target)) return;
+                fetch('https://api.emailjs.com/api/v1.0/email/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        service_id: EMAILJS_CONFIG.serviceId,
+                        template_id: EMAILJS_CONFIG.templateId,
+                        user_id: EMAILJS_CONFIG.publicKey,
+                        template_params: {
+                            to_email: ADMIN_NOTIF_EMAIL,
+                            subject: 'LE QG - ' + title,
+                            title: title,
+                            message: String(message) + '\n\n' + new Date().toLocaleString('fr-FR') + '\n' + location.href.split('#')[0]
+                        }
+                    })
+                }).catch(() => {});
+            } catch (e) { /* l'e-mail est un plus : on ne bloque jamais le site */ }
+        }
+
         async function pushGlobalNotification(title, message, targetUsername = null) {
             let notifs = DB.get('app_notifications') || [];
             notifs.unshift({
@@ -574,6 +643,7 @@
                 date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
             });
             await DB.set('app_notifications', notifs);
+            emailAdminNotification(title, message, targetUsername || 'all');
             showToast(title, message);
         }
 
@@ -726,6 +796,7 @@
             if (!myRole) return app.innerHTML = `<div class="flex-1 flex flex-col items-center justify-center p-6 text-center"><h1 class="text-xl font-bold text-red-400">Compte non autorisé</h1><p class="text-amber-200/70 text-xs mt-2">Ce compte n'a pas accès au QG. Contacte l'administration.</p><button onclick="logout()" class="mt-4 px-4 py-2 dyn-btn text-white rounded-xl text-xs">Déconnexion</button></div>`;
             if (myRole.status === 'masked') return app.innerHTML = `<div class="flex-1 flex flex-col items-center justify-center p-6 text-center"><h1 class="text-xl font-bold text-red-400">Compte suspendu</h1><button onclick="logout()" class="mt-4 px-4 py-2 dyn-btn text-white rounded-xl text-xs">Déconnexion</button></div>`;
             if (!dataReady) return app.innerHTML = `<div class="flex-1 flex items-center justify-center text-amber-200/70 text-xs">Chargement...</div>`;
+            if (isMaintenanceBlocked()) return app.innerHTML = renderMaintenance();
             if (!user) return app.innerHTML = `<div class="flex-1 flex flex-col items-center justify-center p-6 text-center"><h1 class="text-xl font-bold text-red-400">Compte non autorisé</h1><p class="text-amber-200/70 text-xs mt-2">Cette adresse e-mail n'est rattachée à aucun profil du QG. Contacte l'administration.</p><button onclick="logout()" class="mt-4 px-4 py-2 dyn-btn text-white rounded-xl text-xs">Déconnexion</button></div>`;
             if (user.status === 'masked') return app.innerHTML = `<div class="flex-1 flex flex-col items-center justify-center p-6 text-center"><h1 class="text-xl font-bold text-red-400">Compte suspendu</h1><button onclick="logout()" class="mt-4 px-4 py-2 dyn-btn text-white rounded-xl text-xs">Déconnexion</button></div>`;
             if (user.needsSetup || user.mustChangePass) return app.innerHTML = renderSetup(user);
@@ -734,6 +805,9 @@
             sheetAfterRender();
             if (state.tab === 'profile') requestAnimationFrame(() => buildAvatar3D(getCurrentUser() || user));
             else disposeAvatar3D();
+            const salonConfig = DB.get('christmas_salon_config') || { enabled: false };
+            if (state.tab === 'home' && salonConfig.enabled) requestAnimationFrame(() => buildChristmasSalon());
+            else disposeChristmasSalon();
         }
 
         function renderLogin() {
@@ -1615,7 +1689,9 @@
             const diffDays = hasCountdown ? getCountdownDays(countdown.date) : null;
             const qrCodeImg = DB.get('home_qr_image') || '';
 
-            return `<div class="max-w-3xl mx-auto space-y-6 text-center">
+            const christmasConfig = DB.get('christmas_salon_config') || { enabled: false };
+            return `<div class="max-w-5xl mx-auto space-y-6 text-center">
+                ${christmasConfig.enabled ? renderChristmasSalonCard() : ''}
                 ${hasCountdown ? `
                     <div class="dyn-card border p-8 space-y-3 rounded-3xl shadow-2xl">
                         <h2 class="text-3xl font-black text-amber-400">⏳ ${escapeHtml(countdown.title)}</h2>
@@ -2472,28 +2548,275 @@
             return !!(entry && entry.weekKey === getCrosswordWeekKey());
         }
 
-        function renderCrosswordGrid(grid, user, isWeekly) {
-            const played = crosswordAlreadyPlayed(user, grid.id);
-            const prefix = `cw-${grid.id}`;
-            return `
-                <div class="p-5 bg-stone-900 rounded-2xl border ${isWeekly ? 'border-amber-500/40' : ''} space-y-4">
-                    <div class="flex justify-between items-center gap-3">
-                        <h4 class="font-black text-sm text-amber-300">${isWeekly ? '⭐ Grille Hebdomadaire : ' : ''}${escapeHtml(grid.title)} (${grid.words.length} mots)</h4>
-                        <span class="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${grid.pointsPerWord || 1} pts par mot trouvé</span>
-                    </div>
-                    ${played ? `<p class="text-amber-200/60 font-bold">Cette grille a déjà été validée cette semaine. Elle sera de nouveau disponible la semaine prochaine.</p>` : `
-                        <div class="space-y-3">
-                            ${grid.words.map((w, idx) => `
-                                <div class="p-3 bg-stone-950 rounded-xl border space-y-2">
-                                    <p class="font-bold text-amber-100"><b>Indice ${idx+1} :</b> ${w.clue}</p>
-                                    <input type="text" id="${prefix}-${idx}" placeholder="Votre réponse..." class="w-full p-2 bg-stone-900 border rounded-xl text-amber-300 font-bold uppercase">
-                                </div>
-                            `).join('')}
-                        </div>
-                        <button onclick="validateCrosswordGrid('${jsAttr(grid.id)}')" class="w-full py-3 dyn-btn text-white font-bold rounded-xl">Valider toute la grille</button>
-                    `}
+        // ---- Mots croisés : vraie grille conventionnelle (placement automatique, cases numérotées) ----
+        function cwNorm(a) { return String(a == null ? '' : a).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+        function cwHash(str) { let h = 2166136261; const t = String(str); for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+        function cwRng(seed) { let t = seed >>> 0; return function () { t = (t + 0x6D2B79F5) >>> 0; let r = Math.imul(t ^ (t >>> 15), 1 | t); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
+
+        function cwAttempt(entries, rnd) {
+            const cells = {}, dirs = {}, placed = [];
+            let minR = 0, maxR = 0, minC = 0, maxC = 0, any = false;
+            const K = (r, c) => r + ',' + c;
+            const at = (r, c) => cells[K(r, c)];
+            const test = (w, r, c, dir) => {
+                const dr = dir === 'D' ? 1 : 0, dc = dir === 'A' ? 1 : 0;
+                if (at(r - dr, c - dc) || at(r + dr * w.length, c + dc * w.length)) return -1;
+                let cross = 0;
+                for (let i = 0; i < w.length; i++) {
+                    const rr = r + dr * i, cc = c + dc * i, ex = at(rr, cc);
+                    if (ex) {
+                        if (ex !== w[i] || (dirs[K(rr, cc)] || '').indexOf(dir) >= 0) return -1;
+                        cross++;
+                    } else if (at(rr + dc, cc + dr) || at(rr - dc, cc - dr)) return -1;
+                }
+                return cross;
+            };
+            const put = (idx, w, r, c, dir) => {
+                const dr = dir === 'D' ? 1 : 0, dc = dir === 'A' ? 1 : 0;
+                for (let i = 0; i < w.length; i++) { const k = K(r + dr * i, c + dc * i); cells[k] = w[i]; dirs[k] = (dirs[k] || '') + dir; }
+                const r2 = r + dr * (w.length - 1), c2 = c + dc * (w.length - 1);
+                if (!any) { minR = r; maxR = r2; minC = c; maxC = c2; any = true; }
+                else { minR = Math.min(minR, r); maxR = Math.max(maxR, r2); minC = Math.min(minC, c); maxC = Math.max(maxC, c2); }
+                placed.push({ idx, r, c, dir, len: w.length });
+            };
+            const pending = entries.slice();
+            let linked = 1;
+            put(pending[0].idx, pending[0].w, 0, 0, 'A');
+            pending.shift();
+            let progress = true;
+            while (pending.length && progress) {
+                progress = false;
+                for (let p = 0; p < pending.length; p++) {
+                    const w = pending[p].w;
+                    let best = null, bestScore = -Infinity;
+                    Object.keys(cells).forEach(k => {
+                        const ch = cells[k];
+                        if (w.indexOf(ch) < 0) return;
+                        const parts = k.split(','), cr = Number(parts[0]), cc = Number(parts[1]);
+                        for (let i = 0; i < w.length; i++) {
+                            if (w[i] !== ch) continue;
+                            ['A', 'D'].forEach(dir => {
+                                const r = dir === 'D' ? cr - i : cr, c = dir === 'A' ? cc - i : cc;
+                                const cross = test(w, r, c, dir);
+                                if (cross < 1) return;
+                                const nr0 = Math.min(minR, r), nr1 = Math.max(maxR, dir === 'D' ? r + w.length - 1 : r);
+                                const nc0 = Math.min(minC, c), nc1 = Math.max(maxC, dir === 'A' ? c + w.length - 1 : c);
+                                const sc = cross * 1000 - (nr1 - nr0 + 1) * (nc1 - nc0 + 1) - Math.abs((nr1 - nr0) - (nc1 - nc0)) * 3 + rnd();
+                                if (sc > bestScore) { bestScore = sc; best = { r, c, dir }; }
+                            });
+                        }
+                    });
+                    if (best) { put(pending[p].idx, w, best.r, best.c, best.dir); linked++; pending.splice(p, 1); p--; progress = true; }
+                }
+            }
+            // mots sans lettre commune avec les autres : posés à part, sous la grille
+            pending.forEach(e => { put(e.idx, e.w, maxR + 2, minC, 'A'); });
+            return { placed, linked, minR, maxR, minC, maxC };
+        }
+
+        function cwBuildLayout(words, seed) {
+            const entries = words.map((x, idx) => ({ idx, w: cwNorm(x.answer) })).filter(e => e.w.length > 0);
+            if (!entries.length) return { w: 0, h: 0, words: [] };
+            const rnd = cwRng(seed);
+            const attempts = entries.length > 40 ? 8 : 40;
+            let best = null, bestScore = -Infinity;
+            for (let a = 0; a < attempts; a++) {
+                const order = entries.map(e => ({ e, k: e.w.length + rnd() * 3 })).sort((x, y) => y.k - x.k).map(o => o.e);
+                const res = cwAttempt(order, rnd);
+                const h = res.maxR - res.minR + 1, wd = res.maxC - res.minC + 1;
+                const sc = res.linked * 100000 - h * wd - Math.abs(h - wd) * 3;
+                if (sc > bestScore) { bestScore = sc; best = res; }
+            }
+            const placed = best.placed.map(p => ({ idx: p.idx, r: p.r - best.minR, c: p.c - best.minC, dir: p.dir, len: p.len }));
+            const starts = {};
+            placed.forEach(p => { starts[p.r + ',' + p.c] = true; });
+            const keys = Object.keys(starts).sort((a, b) => { const x = a.split(',').map(Number), y = b.split(',').map(Number); return (x[0] - y[0]) || (x[1] - y[1]); });
+            const num = {};
+            keys.forEach((k, i) => { num[k] = i + 1; });
+            placed.forEach(p => { p.num = num[p.r + ',' + p.c]; });
+            return { w: best.maxC - best.minC + 1, h: best.maxR - best.minR + 1, words: placed };
+        }
+
+        const cwLayoutCache = {};
+        function cwGetLayout(grid) {
+            if (grid.layout && Array.isArray(grid.layout.words)) return grid.layout;
+            const key = grid.id + '|' + grid.words.map(w => w.answer).join('|');
+            if (!cwLayoutCache[key]) cwLayoutCache[key] = cwBuildLayout(grid.words, cwHash(key));
+            return cwLayoutCache[key];
+        }
+
+        function renderCrosswordPlay(grid, user) {
+            const head = `<div class="flex justify-between items-center gap-3 flex-wrap"><h4 class="font-black text-sm text-amber-300">${grid.isWeekly ? '⭐ ' : ''}${escapeHtml(grid.title)} (${grid.words.length} mots)</h4><span class="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${grid.pointsPerWord || 1} pts par mot trouvé</span></div>`;
+            if (crosswordAlreadyPlayed(user, grid.id)) {
+                return `<div class="p-5 bg-stone-900 rounded-2xl border space-y-4">${head}<p class="text-amber-200/60 font-bold">Cette grille a déjà été validée cette semaine. Elle sera de nouveau disponible la semaine prochaine.</p></div>`;
+            }
+            const L = cwGetLayout(grid);
+            const letters = (state.cwLetters && state.cwLetters[grid.id]) || {};
+            const info = {};
+            L.words.forEach(p => {
+                const dr = p.dir === 'D' ? 1 : 0, dc = p.dir === 'A' ? 1 : 0;
+                for (let i = 0; i < p.len; i++) {
+                    const k = (p.r + dr * i) + ',' + (p.c + dc * i);
+                    const ci = info[k] = info[k] || { a: -1, d: -1, num: 0 };
+                    if (p.dir === 'A') ci.a = p.idx; else ci.d = p.idx;
+                    if (i === 0) ci.num = p.num;
+                }
+            });
+            let rows = '';
+            for (let r = 0; r < L.h; r++) {
+                let tds = '';
+                for (let c = 0; c < L.w; c++) {
+                    const ci = info[r + ',' + c];
+                    if (!ci) { tds += '<td><div class="cw-cell cw-black"></div></td>'; continue; }
+                    tds += `<td><div class="cw-cell"><input type="text" maxlength="2" autocomplete="off" autocapitalize="characters" spellcheck="false" id="cwc-${escapeHtml(grid.id)}-${r}-${c}" data-g="${escapeHtml(grid.id)}" data-r="${r}" data-c="${c}" data-wa="${ci.a}" data-wd="${ci.d}" value="${escapeHtml(letters[r + ',' + c] || '')}" oninput="cwInput(this)" onkeydown="cwKey(event,this)" onfocus="cwFocus(this)" onclick="cwClick(this)" class="cw-input">${ci.num ? `<span class="cw-num">${ci.num}</span>` : ''}</div></td>`;
+                }
+                rows += `<tr>${tds}</tr>`;
+            }
+            const clueList = dir => L.words.filter(p => p.dir === dir).sort((a, b) => a.num - b.num).map(p =>
+                `<li id="cwclue-${escapeHtml(grid.id)}-${p.idx}"><b class="text-amber-300">${p.num}.</b> ${escapeHtml(grid.words[p.idx].clue)} <span class="text-amber-200/50">(${p.len})</span></li>`).join('');
+            return `<div class="p-5 bg-stone-900 rounded-2xl border ${grid.isWeekly ? 'border-amber-500/40' : ''} space-y-4">
+                ${head}
+                <p id="cw-active" class="min-h-[1.25rem] font-bold text-amber-100"></p>
+                <div class="overflow-x-auto pb-2"><table id="cw-board" class="mx-auto border-collapse"><tbody>${rows}</tbody></table></div>
+                <p class="text-[10px] text-amber-200/50">Cliquez sur une case pour écrire. Cliquez une 2<sup>e</sup> fois (ou touche Espace) pour changer de sens. Flèches du clavier pour vous déplacer. Les accents et les espaces ne sont pas à saisir.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div><h5 class="font-black text-amber-400 mb-1">Horizontalement</h5><ul class="space-y-1 text-amber-100">${clueList('A') || '<li class="text-amber-200/40">–</li>'}</ul></div>
+                    <div><h5 class="font-black text-amber-400 mb-1">Verticalement</h5><ul class="space-y-1 text-amber-100">${clueList('D') || '<li class="text-amber-200/40">–</li>'}</ul></div>
                 </div>
-            `;
+                <button onclick="validateCrosswordGrid('${jsAttr(grid.id)}')" class="w-full py-3 dyn-btn text-white font-bold rounded-xl">Valider toute la grille</button>
+            </div>`;
+        }
+
+        function renderCrosswordsBody(user, grids) {
+            const open = state.cwOpen ? grids.find(g => g.id === state.cwOpen) : null;
+            if (open) {
+                return `<div class="space-y-4"><button type="button" onclick="state.cwOpen=null;render()" class="px-3 py-1.5 bg-stone-800 text-amber-300 font-bold rounded-xl text-xs"><i class="fa-solid fa-arrow-left mr-1"></i> Retour aux grilles</button>${renderCrosswordPlay(open, user)}</div>`;
+            }
+            if (!grids.length) return '<p class="text-amber-200/50 text-center py-4">Aucune grille n\'est actuellement publiée.</p>';
+            const sorted = grids.slice().sort((a, b) => (b.isWeekly ? 1 : 0) - (a.isWeekly ? 1 : 0));
+            return `<div class="space-y-3">${sorted.map(g => {
+                const played = crosswordAlreadyPlayed(user, g.id);
+                return `<div class="flex items-center justify-between gap-3 p-4 bg-stone-900 rounded-2xl border ${g.isWeekly ? 'border-amber-500/40' : ''}"><div><b class="text-amber-100 text-sm">${g.isWeekly ? '⭐ ' : ''}${escapeHtml(g.title)}</b><div class="text-amber-200/60">${g.isWeekly ? 'Grille de la semaine · ' : ''}${g.words.length} mots · ${g.pointsPerWord || 1} pt(s) par mot</div></div>${played ? '<span class="px-3 py-2 bg-green-900/40 text-green-300 font-bold rounded-xl">✅ Déjà jouée cette semaine</span>' : `<button type="button" onclick="state.cwOpen='${jsAttr(g.id)}';render()" class="px-5 py-2 dyn-btn text-white font-bold rounded-xl"><i class="fa-solid fa-play mr-1"></i> Jouer</button>`}</div>`;
+            }).join('')}</div>`;
+        }
+
+        // ---- Saisie dans la grille ----
+        function cwCellEl(g, r, c) { return document.getElementById('cwc-' + g + '-' + r + '-' + c); }
+        function cwStore(el, v) {
+            state.cwLetters = state.cwLetters || {};
+            (state.cwLetters[el.dataset.g] = state.cwLetters[el.dataset.g] || {})[el.dataset.r + ',' + el.dataset.c] = v;
+        }
+        function cwMove(el, step) {
+            const dir = state.cwDir || 'A';
+            const nx = cwCellEl(el.dataset.g, Number(el.dataset.r) + (dir === 'D' ? step : 0), Number(el.dataset.c) + (dir === 'A' ? step : 0));
+            if (nx) nx.focus();
+        }
+        function cwInput(el) {
+            const v = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(-1);
+            el.value = v;
+            cwStore(el, v);
+            if (v) cwMove(el, 1);
+        }
+        function cwWordCells(el, dir) {
+            const g = el.dataset.g, attr = dir === 'A' ? 'wa' : 'wd', idx = el.dataset[attr];
+            if (idx === undefined || idx === '-1') return [];
+            const dr = dir === 'D' ? 1 : 0, dc = dir === 'A' ? 1 : 0;
+            const same = e => !!e && e.dataset[attr] === idx;
+            let r = Number(el.dataset.r), c = Number(el.dataset.c);
+            while (same(cwCellEl(g, r - dr, c - dc))) { r -= dr; c -= dc; }
+            const out = [];
+            while (same(cwCellEl(g, r, c))) { out.push(cwCellEl(g, r, c)); r += dr; c += dc; }
+            return out;
+        }
+        function cwFocus(el) {
+            const hasA = el.dataset.wa !== '-1', hasD = el.dataset.wd !== '-1';
+            if (hasA && !hasD) state.cwDir = 'A'; else if (hasD && !hasA) state.cwDir = 'D';
+            const dir = state.cwDir || 'A';
+            const board = document.getElementById('cw-board');
+            if (board) board.querySelectorAll('.cw-hl').forEach(e => e.classList.remove('cw-hl'));
+            cwWordCells(el, dir).forEach(e => e.classList.add('cw-hl'));
+            const clue = document.getElementById('cwclue-' + el.dataset.g + '-' + (dir === 'A' ? el.dataset.wa : el.dataset.wd));
+            const bar = document.getElementById('cw-active');
+            if (bar) bar.textContent = clue ? clue.textContent : '';
+        }
+        function cwClick(el) {
+            if (state.cwLast === el.id && el.dataset.wa !== '-1' && el.dataset.wd !== '-1') { state.cwDir = state.cwDir === 'D' ? 'A' : 'D'; cwFocus(el); }
+            state.cwLast = el.id;
+        }
+        function cwKey(ev, el) {
+            const g = el.dataset.g, r = Number(el.dataset.r), c = Number(el.dataset.c);
+            const jump = (dir, dr, dc) => { state.cwDir = dir; const nx = cwCellEl(g, r + dr, c + dc); if (nx) nx.focus(); else cwFocus(el); ev.preventDefault(); };
+            if (ev.key === 'ArrowRight') return jump('A', 0, 1);
+            if (ev.key === 'ArrowLeft') return jump('A', 0, -1);
+            if (ev.key === 'ArrowDown') return jump('D', 1, 0);
+            if (ev.key === 'ArrowUp') return jump('D', -1, 0);
+            if (ev.key === ' ') {
+                if (el.dataset.wa !== '-1' && el.dataset.wd !== '-1') { state.cwDir = state.cwDir === 'D' ? 'A' : 'D'; cwFocus(el); }
+                ev.preventDefault();
+                return;
+            }
+            if (ev.key === 'Backspace' && !el.value) {
+                const dir = state.cwDir || 'A';
+                const nx = cwCellEl(g, r - (dir === 'D' ? 1 : 0), c - (dir === 'A' ? 1 : 0));
+                if (nx) { nx.value = ''; cwStore(nx, ''); nx.focus(); }
+                ev.preventDefault();
+            }
+        }
+
+        async function validateCrosswordGrid(gridId) {
+            const user = getCurrentUser();
+            if (!user) return;
+            if (crosswordAlreadyPlayed(user, gridId)) return showToast("Grille déjà jouée", "Vous ne pouvez faire cette grille qu'une seule fois cette semaine.");
+            const grids = DB.get('crosswords_grids') || [];
+            const grid = grids.find(g => g.id === gridId);
+            if (!grid) return;
+            const L = cwGetLayout(grid);
+            const letters = (state.cwLetters && state.cwLetters[gridId]) || {};
+            const expected = {};
+            let correctCount = 0;
+            L.words.forEach(p => {
+                const ans = cwNorm(grid.words[p.idx].answer);
+                const dr = p.dir === 'D' ? 1 : 0, dc = p.dir === 'A' ? 1 : 0;
+                let ok = true;
+                for (let i = 0; i < ans.length; i++) {
+                    const k = (p.r + dr * i) + ',' + (p.c + dc * i);
+                    expected[k] = ans[i];
+                    if ((letters[k] || '') !== ans[i]) ok = false;
+                }
+                if (ok) correctCount++;
+            });
+            Object.keys(expected).forEach(k => {
+                const parts = k.split(',');
+                const el = cwCellEl(gridId, parts[0], parts[1]);
+                if (!el) return;
+                el.classList.remove('cw-hl', 'cw-ok', 'cw-ko');
+                el.classList.add((letters[k] || '') === expected[k] ? 'cw-ok' : 'cw-ko');
+            });
+            const subs = DB.get('crosswords_submissions') || {};
+            if (!subs[user.username]) subs[user.username] = {};
+            subs[user.username][gridId] = { weekKey: getCrosswordWeekKey(), correctCount, total: grid.words.length };
+            await DB.set('crosswords_submissions', subs);
+            if (state.cwLetters) delete state.cwLetters[gridId];
+            const points = correctCount * (parseFloat(grid.pointsPerWord) || 1);
+            if (points > 0) {
+                const scores = DB.get('user_scores') || {};
+                scores[user.username] = parseFloat(((parseFloat(scores[user.username]) || 0) + points).toFixed(2));
+                await DB.set('user_scores', scores);
+            }
+            showToast("Grille validée", `${correctCount}/${grid.words.length} bonne(s) réponse(s). ${points} point(s) ajouté(s). Cette grille sera de nouveau disponible la semaine prochaine.`);
+            setTimeout(render, 600);
+        }
+
+        async function adminDeleteCrosswordGrid(gridId) {
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
+            const grids = DB.get('crosswords_grids') || [];
+            const g = grids.find(x => x.id === gridId);
+            if (!g) return;
+            if (!confirm('Supprimer définitivement la grille « ' + g.title + ' » ?' + (g.isWeekly ? '\n\nC’est la grille de la semaine : il n’y en aura plus tant que vous n’en définirez pas une autre.' : ''))) return;
+            await DB.set('crosswords_grids', grids.filter(x => x.id !== gridId));
+            if (state.cwOpen === gridId) state.cwOpen = null;
+            showToast('Grille supprimée', '« ' + g.title + ' » a été supprimée.');
+            render();
         }
 
         function renderCrosswordsSection(user) {
@@ -2509,39 +2832,8 @@
                         <div class="flex items-center gap-3"><div class="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl text-xl"><i class="fa-solid fa-puzzle-piece"></i></div><div><h3 class="font-black text-lg text-amber-400">Mots Croisés MCV</h3><p class="text-xs text-amber-200/60">Répondez aux grilles de la semaine et d'entraînement pour réviser !</p></div></div>
                         <div class="p-3 bg-stone-900 border rounded-2xl text-right"><span class="text-amber-300 font-bold">Oublis enregistrés :</span><div class="text-sm font-black text-red-400">${userMisses} / 2 oubli(s)</div><span class="text-[9px] text-amber-200/50">Attention au seuil de 17.90 pts !</span></div>
                     </div>
-                    ${weeklyGrid ? renderCrosswordGrid(weeklyGrid, user, true) : '<p class="text-amber-200/50 text-center py-4">Aucune grille de la semaine n\'est actuellement définie.</p>'}
-                    ${freeGrids.length ? `<div class="space-y-4 pt-4 border-t border-amber-900/40"><h4 class="font-black text-sm text-amber-400">🎮 Autres grilles</h4>${freeGrids.map(g => renderCrosswordGrid(g, user, false)).join('')}</div>` : ''}
+                    ${renderCrosswordsBody(user, grids)}
                 </div>`;
-        }
-
-        async function validateCrosswordGrid(gridId) {
-            const user = getCurrentUser();
-            if (!user) return;
-            if (crosswordAlreadyPlayed(user, gridId)) return showToast("Grille déjà jouée", "Vous ne pouvez faire cette grille qu'une seule fois cette semaine.");
-            const grids = DB.get('crosswords_grids') || [];
-            const grid = grids.find(g => g.id === gridId);
-            if (!grid) return;
-            let correctCount = 0;
-            grid.words.forEach((w, idx) => {
-                const input = document.getElementById(`cw-${grid.id}-${idx}`);
-                if (!input) return;
-                const correct = input.value.trim().toUpperCase() === String(w.answer).trim().toUpperCase();
-                input.classList.remove('border-green-500', 'bg-green-900/40', 'border-red-500', 'bg-red-900/40');
-                input.classList.add(correct ? 'border-green-500' : 'border-red-500', correct ? 'bg-green-900/40' : 'bg-red-900/40');
-                if (correct) correctCount++;
-            });
-            const subs = DB.get('crosswords_submissions') || {};
-            if (!subs[user.username]) subs[user.username] = {};
-            subs[user.username][gridId] = { weekKey: getCrosswordWeekKey(), correctCount, total: grid.words.length };
-            await DB.set('crosswords_submissions', subs);
-            const points = correctCount * (parseFloat(grid.pointsPerWord) || 1);
-            if (points > 0) {
-                const scores = DB.get('user_scores') || {};
-                scores[user.username] = parseFloat(((parseFloat(scores[user.username]) || 0) + points).toFixed(2));
-                await DB.set('user_scores', scores);
-            }
-            showToast("Grille validée", `${correctCount}/${grid.words.length} bonne(s) réponse(s). ${points} point(s) ajouté(s). Cette grille sera de nouveau disponible la semaine prochaine.`);
-            setTimeout(render, 600);
         }
 
         function renderNotesTab(user) {
@@ -3595,6 +3887,7 @@
             const subs = DB.get('quiz_submissions') || {};
             const scores = DB.get('user_scores') || {};
             const cw = DB.get('crosswords_submissions') || {};
+            const cwIds = new Set((DB.get('crosswords_grids') || []).map(g => g.id));
             const subjLabel = s => String(s || '').trim() || 'Général';
             const keyOf = s => subjLabel(s).toLowerCase();
             const quizMap = {}; quizzes.forEach(q => { quizMap[q.id] = q; });
@@ -3647,7 +3940,7 @@
             if (student) {
                 const rows = filtered.slice().sort((a, b) => (b.date ? b.date.getTime() : 0) - (a.date ? a.date.getTime() : 0));
                 detail = `<h4 class="font-bold text-amber-300">Résultats de ${escapeHtml(nameOf(student))}</h4>` + (rows.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><thead><tr class="text-[10px] uppercase text-amber-200/60"><th class="p-2">Quiz</th><th class="p-2">Matière</th><th class="p-2">Date</th><th class="p-2">Score</th><th class="p-2 w-40">Réussite</th></tr></thead><tbody>${rows.map(r => `<tr class="border-t border-amber-900/30"><td class="p-2 font-bold text-amber-100">${escapeHtml(r.title)}</td><td class="p-2 text-amber-200/80">${escapeHtml(r.subject)}</td><td class="p-2 text-amber-200/80">${escapeHtml(r.dateStr || '–')}</td><td class="p-2 text-amber-200/80">${r.score} / ${r.total}</td><td class="p-2"><div class="flex items-center gap-2"><span class="font-black text-amber-300 w-10">${Math.round(r.pct)} %</span>${progressBar(r.pct)}</div></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-amber-200/50 italic">Cet élève n’a pas encore fait de quiz' + (f.subject ? ' dans cette matière' : '') + '.</p>');
-                const pts = parseFloat(scores[student.username]) || 0, nbCw = Object.keys(cw[student.username] || {}).length;
+                const pts = parseFloat(scores[student.username]) || 0, nbCw = Object.keys(cw[student.username] || {}).filter(id => cwIds.has(id)).length;
                 detail += `<p class="text-amber-200/70">Points au classement : <b class="text-amber-300">${pts}</b> · Grilles de mots croisés faites : <b class="text-amber-300">${nbCw}</b></p>`;
             } else {
                 const rows = scope.map(u => {
@@ -3655,7 +3948,7 @@
                     const avg = progressAvg(rs.map(r => r.pct));
                     const dated = rs.filter(r => r.date);
                     const last = dated.length ? new Date(Math.max.apply(null, dated.map(r => r.date.getTime()))) : null;
-                    const pts = parseFloat(scores[u.username]) || 0, nbCw = Object.keys(cw[u.username] || {}).length;
+                    const pts = parseFloat(scores[u.username]) || 0, nbCw = Object.keys(cw[u.username] || {}).filter(id => cwIds.has(id)).length;
                     return `<tr class="border-t border-amber-900/30"><td class="p-2 font-bold text-amber-100"><button type="button" onclick="progressSetFilter('student', '${jsAttr(u.username)}')" class="underline decoration-dotted text-left">${escapeHtml(nameOf(u))}</button></td><td class="p-2 text-amber-200/80">${rs.length}</td><td class="p-2 w-40">${rs.length ? `<div class="flex items-center gap-2"><span class="font-black ${avg < 50 ? 'text-red-400' : 'text-amber-300'} w-10">${Math.round(avg)} %</span>${progressBar(avg)}</div>` : '<span class="text-orange-300">Aucun quiz</span>'}</td><td class="p-2">${progressTrend(dated)}</td><td class="p-2 text-amber-200/80">${last ? escapeHtml(last.toLocaleDateString('fr-FR')) : '–'}</td><td class="p-2 text-amber-200/80">${pts}</td><td class="p-2 text-amber-200/80">${nbCw}</td></tr>`;
                 }).join('');
                 detail = `<h4 class="font-bold text-amber-300">Élève par élève</h4>` + (scope.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><thead><tr class="text-[10px] uppercase text-amber-200/60"><th class="p-2">Élève</th><th class="p-2">Quiz faits</th><th class="p-2">Moyenne</th><th class="p-2">Évolution</th><th class="p-2">Dernier quiz</th><th class="p-2">Points</th><th class="p-2">Mots croisés</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="text-amber-200/50 italic">Aucun élève dans ce groupe.</p>');
@@ -3729,10 +4022,37 @@
             subjects.splice(index,1); await DB.set('exam_subjects',subjects); render();
         }
 
+        // ---- Mode maintenance : tous les comptes sauf admin voient cette page ----
+        function renderMaintenance() {
+            const m = DB.get('maintenance') || {};
+            const msg = String(m.message || '').trim() || 'Le QG est temporairement indisponible pour cause de maintenance. Merci de revenir un peu plus tard.';
+            return `<div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+                <div class="dyn-card border p-8 rounded-3xl max-w-md space-y-3">
+                    <i class="fa-solid fa-screwdriver-wrench text-4xl text-amber-400"></i>
+                    <h1 class="text-xl font-black text-amber-300">Site en maintenance</h1>
+                    <p class="text-amber-200/80 text-xs whitespace-pre-line">${escapeHtml(msg)}</p>
+                    <button onclick="logout()" class="mt-2 px-4 py-2 dyn-btn text-white rounded-xl text-xs">Déconnexion</button>
+                </div>
+            </div>`;
+        }
+
+        async function adminToggleMaintenance() {
+            if (!isAdmin(getCurrentUser())) return alert('Action réservée aux administrateurs.');
+            const cur = DB.get('maintenance') || { enabled: false, message: '' };
+            const next = !cur.enabled;
+            const msgEl = document.getElementById('maintenance-msg');
+            const message = msgEl ? msgEl.value.trim().slice(0, 300) : String(cur.message || '');
+            if (next && !confirm('Activer la maintenance ?\n\nTous les utilisateurs (sauf les administrateurs) verront immédiatement une page de maintenance.')) return;
+            await DB.set('maintenance', { enabled: next, message, updatedDate: new Date().toISOString() });
+            showToast(next ? 'Maintenance activée' : 'Maintenance désactivée', next ? 'Seuls les administrateurs peuvent utiliser le site.' : 'Le site est de nouveau accessible à tous.');
+            render();
+        }
+
         function renderAdmin() {
             let users = DB.get('users') || [];
             let msgs = DB.get('messages') || [];
             let apps = DB.get('appreciations') || {};
+            const maint = DB.get('maintenance') || { enabled: false, message: '' };
 
             return `
                 <div class="max-w-5xl mx-auto space-y-6 text-xs">
@@ -3758,7 +4078,15 @@
                             ${adminNavBtn('export', 'Export Excel', 'file-excel')}
                             ${adminNavBtn('qrcode', 'QR Code', 'qrcode')}
                             ${adminNavBtn('countdown', 'Compte à rebours', 'hourglass-half')}
+                            ${adminNavBtn('salon_noel', 'Salon de Noël 3D', 'tree')}
+                            ${adminNavBtn('tirages_noel', 'Suivi des tirages', 'gift')}
                             ${adminNavBtn('agenda', 'Agenda & publications', 'calendar-days')}
+                        </div>
+                        <div class="flex flex-wrap items-center gap-3 border-t border-amber-900/40 pt-3">
+                            <span class="font-bold text-amber-200"><i class="fa-solid fa-screwdriver-wrench mr-1"></i>Maintenance :</span>
+                            ${maint.enabled ? '<span class="px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 font-black">ACTIVE – seuls les admins accèdent au site</span>' : '<span class="px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 font-bold">désactivée</span>'}
+                            <input id="maintenance-msg" maxlength="300" value="${escapeHtml(maint.message || '')}" placeholder="Message affiché aux utilisateurs (facultatif)" class="flex-1 min-w-[200px] p-2 bg-stone-950 border rounded-xl text-amber-100">
+                            <button type="button" onclick="adminToggleMaintenance()" class="px-4 py-2 rounded-xl font-bold border ${maint.enabled ? 'bg-green-900/60 text-green-200 border-green-500/40' : 'bg-red-900/60 text-red-200 border-red-500/40'}">${maint.enabled ? 'Désactiver la maintenance' : 'Activer la maintenance'}</button>
                         </div>
                     </div>
 
@@ -4198,6 +4526,15 @@
                                 <label for="cw-is-weekly" class="text-amber-300 font-bold">Définir comme Grille de la Semaine (Soumise au contrôle hebdomadaire)</label>
                             </div>
                             
+                            <div class="p-3 bg-stone-950/60 rounded-2xl border border-dashed border-amber-900/50 space-y-2">
+                                <label class="block font-bold text-amber-200">Importer les mots depuis un fichier (facultatif) :</label>
+                                <p class="text-[10px] text-amber-200/60">Fichier .xlsx, .xls, .ods, .csv ou .txt, un mot par ligne, colonnes : Indice / Définition ; Réponse. Les mots remplissent la liste ci-dessous : vérifiez-les (minimum 10), renseignez le titre, puis cliquez sur « Publier la Grille ».</p>
+                                <div class="flex flex-wrap gap-2 items-center">
+                                    <input type="file" id="cw-import-file" accept=".xlsx,.xls,.ods,.csv,.txt" onchange="adminImportCrosswordFile(this)" class="text-[11px] text-amber-200">
+                                    <button type="button" onclick="adminDownloadCrosswordTemplate()" class="px-3 py-1.5 bg-stone-800 text-amber-300 font-bold rounded-xl text-[11px]"><i class="fa-solid fa-download mr-1"></i> Télécharger le modèle</button>
+                                </div>
+                            </div>
+
                             <div id="cw-words-container" class="space-y-3 max-h-60 overflow-y-auto pr-2">
                                 <div class="grid grid-cols-2 gap-2 cw-word-row">
                                     <input type="text" placeholder="Indice / Définition" required class="p-2 bg-stone-950 border rounded-xl text-amber-100 cw-clue">
@@ -4209,7 +4546,7 @@
                         </form>
                         <div class="pt-4 border-t border-amber-900/40 space-y-3">
                             <h4 class="font-black text-amber-300">Grilles publiées</h4>
-                            ${(DB.get('crosswords_grids') || []).length === 0 ? '<p class="text-amber-200/50">Aucune grille publiée.</p>' : (DB.get('crosswords_grids') || []).map(g => `<div class="flex items-center justify-between gap-3 p-3 bg-stone-950 border rounded-xl"><div><b class="text-amber-100">${escapeHtml(g.title)}</b><div class="text-amber-200/50">${g.words.length} mots</div></div><label class="flex items-center gap-2 text-amber-300 font-bold"><input type="checkbox" ${g.isWeekly ? 'checked' : ''} onchange="adminSetWeeklyCrossword('${jsAttr(g.id)}', this.checked)" class="accent-amber-500"> Grille de la semaine</label></div>`).join('')}
+                            ${(DB.get('crosswords_grids') || []).length === 0 ? '<p class="text-amber-200/50">Aucune grille publiée.</p>' : (DB.get('crosswords_grids') || []).map(g => `<div class="flex items-center justify-between gap-3 p-3 bg-stone-950 border rounded-xl"><div><b class="text-amber-100">${escapeHtml(g.title)}</b><div class="text-amber-200/50">${g.words.length} mots</div></div><label class="flex items-center gap-2 text-amber-300 font-bold"><input type="checkbox" ${g.isWeekly ? 'checked' : ''} onchange="adminSetWeeklyCrossword('${jsAttr(g.id)}', this.checked)" class="accent-amber-500"> Grille de la semaine</label><button type="button" onclick="adminDeleteCrosswordGrid('${jsAttr(g.id)}')" class="px-3 py-1.5 bg-red-900/50 hover:bg-red-900 text-red-300 border border-red-500/40 rounded-xl font-bold"><i class="fa-solid fa-trash-can mr-1"></i> Supprimer</button></div>`).join('')}
                         </div>
                     </div>
                 `;
@@ -4526,6 +4863,29 @@
                     </div>
                 `;
             }
+
+            if (state.adminSub === 'salon_noel') {
+                const cfg = DB.get('christmas_salon_config') || { enabled: false };
+                return `
+                    <div class="dyn-card border p-6 rounded-3xl space-y-5">
+                        <div>
+                            <h3 class="font-bold text-amber-300 text-sm"><i class="fa-solid fa-tree mr-2"></i>Salon de Noël 3D</h3>
+                            <p class="text-[11px] text-amber-200/60 mt-1">Ce réglage est indépendant du thème graphique général de LE QG.</p>
+                        </div>
+                        <div class="p-4 bg-stone-900/80 border rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div><p class="font-black text-amber-100">Affichage sur la page d’accueil</p>
+                            <p class="text-[11px] text-amber-200/60 mt-1">${cfg.enabled ? 'Le salon est actuellement visible.' : 'Le salon est actuellement masqué.'}</p></div>
+                            <button type="button" onclick="adminToggleChristmasSalon()" class="px-5 py-3 rounded-xl font-black border ${cfg.enabled ? 'bg-green-900/60 text-green-200 border-green-500/40' : 'bg-red-900/60 text-red-200 border-red-500/40'}">${cfg.enabled ? 'Désactiver le salon' : 'Activer le salon'}</button>
+                        </div>
+                        <div class="p-4 bg-stone-900/70 rounded-2xl border text-[11px] text-amber-100/80 space-y-1">
+                            <p><b>Calendrier :</b> cadeaux du 1er au 24 décembre 2026.</p>
+                            <p><b>Tirages :</b> un tirage quotidien du 1er au 18 décembre 2026, week-ends inclus.</p>
+                            <p><b>Important :</b> le tirage sécurisé nécessite le déploiement des Cloud Functions fournies avec le fichier. Tant qu’elles ne sont pas déployées, aucun gagnant ne sera tiré depuis le navigateur.</p>
+                        </div>
+                    </div>`;
+            }
+
+            if (state.adminSub === 'tirages_noel') return renderChristmasDrawAdmin();
 
             if (state.adminSub === 'agenda') {
                 return renderAgendaManager();
@@ -4868,6 +5228,75 @@
             render();
         }
 
+        // ---- Import des mots d'une grille depuis un fichier (xlsx, xls, ods, csv, txt) ----
+        // Colonnes : Indice / Définition | Réponse
+        function crosswordRowsToWords(rows) {
+            const words = [], errors = [];
+            let start = 0;
+            if (rows.length && /indice|d[ée]finition/i.test(String(rows[0][0] ?? '')) ) start = 1;
+            for (let i = start; i < rows.length; i++) {
+                const r = rows[i].map(c => String(c ?? '').trim());
+                if (r.every(c => c === '')) continue;
+                const line = i + 1;
+                if (!r[0]) { errors.push('Ligne ' + line + ' : indice vide'); continue; }
+                if (!r[1]) { errors.push('Ligne ' + line + ' : réponse vide'); continue; }
+                words.push({ clue: r[0].slice(0, 300), answer: r[1].slice(0, 60) });
+            }
+            return { words, errors };
+        }
+
+        async function adminImportCrosswordFile(input) {
+            if (!canManageLearning()) return alert('Action réservée aux professeurs et administrateurs.');
+            const file = input.files && input.files[0];
+            if (!file) return;
+            const container = document.getElementById('cw-words-container');
+            if (!container) return;
+            try {
+                if (file.size > 2 * 1024 * 1024) throw new Error('Fichier trop volumineux (2 Mo maximum).');
+                const isText = /\.(csv|txt)$/i.test(file.name);
+                const wb = isText
+                    ? XLSX.read((await file.text()).replace(/^\ufeff/, ''), { type: 'string' })
+                    : XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                if (!ws) throw new Error('Le fichier est vide.');
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+                const { words, errors } = crosswordRowsToWords(rows);
+                if (!words.length) throw new Error('Aucun mot valide trouvé.' + (errors.length ? '\n' + errors.slice(0, 5).join('\n') : ''));
+                const used = Array.from(container.querySelectorAll('.cw-clue, .cw-ans')).some(el => el.value.trim());
+                if (used && !confirm('Remplacer les mots déjà saisis par les ' + words.length + ' mots du fichier ?')) { input.value = ''; return; }
+                const kept = words.slice(0, 100);
+                container.innerHTML = '';
+                kept.forEach(w => {
+                    addCrosswordWordRow();
+                    const row = container.lastElementChild;
+                    row.querySelector('.cw-clue').value = w.clue;
+                    row.querySelector('.cw-ans').value = w.answer;
+                });
+                let msg = kept.length + ' mot(s) importé(s). Vérifiez-les puis publiez la grille.';
+                if (kept.length < 10) msg += '\n\nAttention : il faut au minimum 10 mots par grille.';
+                if (words.length > 100) msg += '\nSeuls les 100 premiers ont été gardés.';
+                if (errors.length) msg += '\n\nLignes ignorées :\n' + errors.slice(0, 8).join('\n') + (errors.length > 8 ? '\n… (' + (errors.length - 8) + ' autres)' : '');
+                alert(msg);
+            } catch (err) {
+                alert('Import impossible : ' + (err && err.message ? err.message : err));
+            }
+            input.value = '';
+        }
+
+        function adminDownloadCrosswordTemplate() {
+            const rows = [
+                ['Indice / Définition', 'Réponse'],
+                ['Document qui formalise un accord entre deux parties', 'Contrat'],
+                ['Somme versée en échange d’un travail', 'Salaire']
+            ];
+            const csv = '\ufeff' + rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            a.download = 'modele-mots-croises.csv';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+
         function addCrosswordWordRow() {
             let container = document.getElementById('cw-words-container');
             if (!container) return;
@@ -4926,6 +5355,7 @@
             }
 
             let newGrid = { id: 'cw_' + Date.now(), title, pointsPerWord, isWeekly, words };
+            newGrid.layout = cwBuildLayout(words, cwHash(newGrid.id));
             grids.push(newGrid);
             await DB.set('crosswords_grids', grids);
             pushGlobalNotification("🧩 Nouvelle grille Mots Croisés", `La grille "${title}" a été publiée !`);
@@ -5730,6 +6160,265 @@
             // Le tableur n'est jamais enregistré : s'il contient du travail, on le télécharge avant de se déconnecter
             if (typeof sheetState !== 'undefined' && sheetState.dirty) { try { sheetAutoExport(); } catch (_) {} }
             auth.signOut().then(() => location.reload());
+        }
+
+
+        /* ================================================================
+           MODULE ADDITIONNEL : SALON DE NOËL 3D
+           Toutes les fonctions sont préfixées christmas pour rester isolées.
+        ================================================================ */
+        const CHRISTMAS_YEAR = 2026;
+        const CHRISTMAS_DRAW_END = `${CHRISTMAS_YEAR}-12-18`;
+        const CHRISTMAS_STORY = [
+            ["Le premier flocon", "La neige tombe sur le village de Val-des-Pins. Dans la vitrine de la vieille librairie, une petite lumière dorée clignote comme si elle attendait quelqu’un."],
+            ["La lettre oubliée", "Noé découvre une enveloppe coincée sous la porte. Elle porte une écriture ancienne et une seule phrase : « Le cœur de Noël s’est égaré. »"],
+            ["La maison aux fenêtres chaudes", "En suivant les traces dans la neige, Noé arrive devant une maison dont toutes les fenêtres brillent. Une odeur de cannelle flotte dans l’air froid."],
+            ["Le gardien du feu", "Un vieil homme veille près de la cheminée. Il explique que la flamme de Noël ne brûle que lorsque les habitants pensent les uns aux autres."],
+            ["Le cadeau rouge", "Sous le sapin, un paquet rouge attend Noé. À l’intérieur, il trouve une petite clochette qui tinte sans qu’on la touche."],
+            ["La radio du grenier", "Une radio poussiéreuse se met à jouer une mélodie inconnue. Chaque note fait apparaître un souvenir heureux dans la pièce."],
+            ["La forêt silencieuse", "Noé traverse la forêt. Les branches couvertes de neige forment une arche, et des empreintes minuscules semblent l’inviter à continuer."],
+            ["Les lumières perdues", "Trois guirlandes se sont éteintes dans le village. Noé les rallume une à une, et les maisons reprennent leurs couleurs."],
+            ["Le renard blanc", "Un renard au pelage immaculé apparaît au détour du chemin. Il dépose une étoile de papier aux pieds de Noé avant de disparaître."],
+            ["La fabrique des rubans", "Dans un atelier caché, des lutins nouent des rubans autour de boîtes de toutes les tailles. Ils cherchent le ruban capable de réunir les amis."],
+            ["Le secret du traîneau", "Un vieux traîneau dort sous une bâche. Il ne peut avancer que si chacun y dépose un vœu destiné à quelqu’un d’autre."],
+            ["La carte étoilée", "Une carte apparaît sur la table. Ses étoiles dessinent le chemin vers la grande place, où le sapin du village attend d’être illuminé."],
+            ["Le défi des flocons", "Le vent emporte les flocons lumineux. Noé les rattrape dans ses mains et comprend que les petits gestes peuvent sauver une grande fête."],
+            ["La cloche du village", "La cloche sonne pour la première fois depuis des années. Les habitants sortent, surpris, et se retrouvent au milieu de la place enneigée."],
+            ["Le chocolat partagé", "Une tasse de chocolat chaud circule de main en main. Personne ne sait qui l’a préparée, mais chacun en offre une gorgée à son voisin."],
+            ["Le message dans la neige", "Des mots apparaissent sous les pas : « Noël n’est pas un endroit, c’est ce que l’on partage. » Noé sourit et poursuit sa route."],
+            ["La nuit des lanternes", "Les habitants accrochent des lanternes aux fenêtres. Le village entier ressemble à une constellation posée sur la terre."],
+            ["Le grand sapin", "Tous se rassemblent autour du sapin. Noé place la petite clochette au sommet, et les guirlandes s’allument d’un seul coup."],
+            ["Une place pour chacun", "Une chaise vide attend encore. Les habitants comprennent qu’il faut laisser une place à ceux qui se sentent seuls."],
+            ["Le paquet mystérieux", "Un paquet sans nom est posé devant la porte de la librairie. À l’intérieur, une photo du village d’autrefois et un mot : « Continuez. »"],
+            ["Le retour du gardien", "Le gardien du feu rejoint la place. Il révèle qu’il cherchait depuis longtemps quelqu’un capable de rallumer l’esprit du village."],
+            ["Le souhait collectif", "Chacun écrit un souhait pour une autre personne. Les papiers sont déposés dans une grande boîte en bois, sans signature."],
+            ["La veille approche", "La neige cesse de tomber. Les fenêtres restent allumées et la radio joue doucement. Noé sait que le village a retrouvé son chemin."],
+            ["La lumière de Noël", "Au matin, la clochette résonne au-dessus du sapin. Noé comprend enfin : la magie de Noël existe chaque fois que l’on prend soin des autres."]
+        ];
+
+        let christmas3D = { renderer:null, scene:null, camera:null, frame:null, group:null, host:null, resize:null, pointer:null, raycaster:null, mouse:null, flames:[], bulbs:[], countdownTexture:null, countdownCanvas:null, countdownContext:null, lastClock:0, audio:null, audioTimer:null, snowGame:false };
+        let christmasBook = { day:1, page:1, max:1, pointerX:0, pointerY:0, dragging:false };
+
+        function christmasTodayKey() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+        function christmasCountdownText() {
+            const now = new Date(), target = new Date(CHRISTMAS_YEAR,11,25,0,0,0);
+            let ms = Math.max(0,target-now);
+            const days = Math.floor(ms/86400000); ms%=86400000;
+            const hours = Math.floor(ms/3600000); ms%=3600000;
+            const minutes = Math.floor(ms/60000); ms%=60000;
+            const seconds = Math.floor(ms/1000);
+            return `${days}j ${String(hours).padStart(2,'0')}h ${String(minutes).padStart(2,'0')}m ${String(seconds).padStart(2,'0')}s`;
+        }
+        function christmasAvailableDay() {
+            const d = new Date();
+            if (d.getFullYear() !== CHRISTMAS_YEAR || d.getMonth() !== 11) return 0;
+            return Math.min(24,d.getDate());
+        }
+        function renderChristmasSalonCard() {
+            const available = christmasAvailableDay();
+            return `<section class="christmas-salon-card text-left">
+                <div class="christmas-salon-head text-center">
+                    <div class="text-3xl mb-1">🎄 ✨ 🎁</div>
+                    <h2 class="text-2xl md:text-3xl font-black">Le Salon de Noël 3D</h2>
+                    <p class="text-xs text-amber-100/90 mt-1">Entre dans le salon, explore le décor et découvre ton chapitre du calendrier de l’Avent.</p>
+                </div>
+                <div id="christmas-3d-host" aria-label="Salon de Noël en trois dimensions"></div>
+                <div class="christmas-hint p-4 space-y-3">
+                    <div class="flex flex-wrap justify-between gap-2 items-center text-xs">
+                        <span>🖱️ Fais glisser pour regarder autour de toi · 🔍 Molette pour zoomer</span>
+                        <span class="text-amber-300 font-bold">Noël dans ${escapeHtml(christmasCountdownText())}</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2 justify-center">
+                        <button type="button" onclick="christmasToggleMusic()" class="px-4 py-2 bg-red-900/70 border border-red-300/30 rounded-xl font-bold text-xs">📻 Radio de Noël</button>
+                        <button type="button" onclick="christmasStartSnowGame()" class="px-4 py-2 bg-sky-900/70 border border-sky-300/30 rounded-xl font-bold text-xs">❄️ Attraper les flocons</button>
+                    </div>
+                    <div class="text-center text-[11px] text-amber-100/60">Les cadeaux déjà ouverts restent consultables. Le cadeau du jour s’ouvre à partir de sa date.</div>
+                    <div class="christmas-gift-grid" aria-label="Calendrier de l'Avent">
+                        ${Array.from({length:24},(_,i)=>{const day=i+1,open=day<=available;return `<button type="button" class="christmas-gift-chip ${open?'available':''} ${day===available?'today':''}" ${open?'':'disabled'} onclick="openChristmasBook(${day})" title="${open?'Ouvrir le chapitre '+day:'Disponible le '+day+' décembre'}">🎁 ${day}</button>`;}).join('')}
+                    </div>
+                </div>
+            </section>`;
+        }
+
+        function christmasMaterial(color,roughness=.78,metalness=0) {
+            return new THREE.MeshStandardMaterial({color,roughness,metalness});
+        }
+        function christmasBox(group,w,h,d,color,x,y,z,day) {
+            const gift=new THREE.Group();
+            const base=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),christmasMaterial(color,.48));
+            base.castShadow=true;base.receiveShadow=true;gift.add(base);
+            const lid=new THREE.Mesh(new THREE.BoxGeometry(w*1.06,.09,d*1.06),christmasMaterial('#f5d58a',.35,.2));
+            lid.position.y=h/2+.035;gift.add(lid);
+            const ribbonMat=christmasMaterial('#f7e7bd',.3,.25);
+            const ribbon1=new THREE.Mesh(new THREE.BoxGeometry(w*.13,h+.1,d*1.08),ribbonMat);gift.add(ribbon1);
+            const ribbon2=new THREE.Mesh(new THREE.BoxGeometry(w*1.08,h+.1,d*.13),ribbonMat);gift.add(ribbon2);
+            const bow=new THREE.Mesh(new THREE.TorusGeometry(.09,.025,6,12),ribbonMat);bow.position.y=h/2+.12;bow.rotation.x=Math.PI/2;gift.add(bow);
+            gift.position.set(x,y,z);gift.rotation.y=(day%5)*.16;
+            gift.userData.giftDay=day;gift.traverse(o=>{if(o.isMesh){o.castShadow=true;o.userData.giftDay=day;}});
+            group.add(gift);return gift;
+        }
+        function christmasAddRoom(scene) {
+            const floor=new THREE.Mesh(new THREE.PlaneGeometry(15,12),christmasMaterial('#68452f',.95));floor.rotation.x=-Math.PI/2;floor.position.y=-.04;floor.receiveShadow=true;scene.add(floor);
+            const rug=new THREE.Mesh(new THREE.CircleGeometry(3.2,48),christmasMaterial('#8b1d24',.95));rug.rotation.x=-Math.PI/2;rug.position.set(0,.01,1);scene.add(rug);
+            const back=new THREE.Mesh(new THREE.PlaneGeometry(15,7),christmasMaterial('#263b32',.95));back.position.set(0,3.45,-4);back.receiveShadow=true;scene.add(back);
+            const side=new THREE.Mesh(new THREE.PlaneGeometry(8,7),christmasMaterial('#34271f',.95));side.rotation.y=Math.PI/2;side.position.set(-7.5,3.45,0);scene.add(side);
+            for(let i=0;i<9;i++){const beam=new THREE.Mesh(new THREE.BoxGeometry(.12,7,.12),christmasMaterial('#56331f'));beam.position.set(-6.7+i*1.67,3.4,-3.91);scene.add(beam);}
+            // Cheminée et manteau
+            const fireBox=new THREE.Mesh(new THREE.BoxGeometry(2.7,2.35,.55),christmasMaterial('#8a4b2b'));fireBox.position.set(-3.6,1.15,-3.48);scene.add(fireBox);
+            const opening=new THREE.Mesh(new THREE.BoxGeometry(1.75,1.35,.12),christmasMaterial('#100b08'));opening.position.set(-3.6,.83,-3.17);scene.add(opening);
+            const mantle=new THREE.Mesh(new THREE.BoxGeometry(3.15,.2,.9),christmasMaterial('#b47a42'));mantle.position.set(-3.6,2.4,-3.25);scene.add(mantle);
+            for(let i=0;i<5;i++){const flame=new THREE.Mesh(new THREE.ConeGeometry(.17+Math.random()*.1,.65+Math.random()*.5,7),new THREE.MeshBasicMaterial({color:i%2?0xff6b18:0xffc247,transparent:true,opacity:.85}));flame.position.set(-4.15+i*.27,.85+Math.random()*.1,-3.05);flame.rotation.z=(Math.random()-.5)*.25;scene.add(flame);christmas3D.flames.push(flame);}
+            const fireLight=new THREE.PointLight(0xff7926,2.6,8);fireLight.position.set(-3.6,1.2,-2.55);scene.add(fireLight);christmas3D.fireLight=fireLight;
+            // Panneau de compte à rebours au-dessus de la cheminée
+            const canvas=document.createElement('canvas');canvas.width=512;canvas.height=180;
+            const ctx=canvas.getContext('2d');ctx.fillStyle='#1a100c';ctx.fillRect(0,0,512,180);ctx.strokeStyle='#e6bd71';ctx.lineWidth=10;ctx.strokeRect(7,7,498,166);
+            ctx.fillStyle='#f8d98a';ctx.font='bold 35px Georgia';ctx.textAlign='center';ctx.fillText('AVANT NOËL',256,55);
+            ctx.font='bold 43px Arial';ctx.fillText(christmasCountdownText(),256,123);
+            const tex=new THREE.CanvasTexture(canvas);tex.needsUpdate=true;
+            const panel=new THREE.Mesh(new THREE.PlaneGeometry(2.5,.88),new THREE.MeshBasicMaterial({map:tex}));panel.position.set(-3.6,3.12,-3.18);scene.add(panel);
+            christmas3D.countdownCanvas=canvas;christmas3D.countdownContext=ctx;christmas3D.countdownTexture=tex;christmas3D.countdownPanel=panel;
+            // Sapin, étages et guirlandes lumineuses
+            const treeX=3.2,treeZ=-2.7;
+            const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.18,.24,.7,10),christmasMaterial('#754321'));trunk.position.set(treeX,.35,treeZ);scene.add(trunk);
+            for(let i=0;i<4;i++){const cone=new THREE.Mesh(new THREE.ConeGeometry(1.25-i*.2,1.65,12),christmasMaterial(i%2?'#14532d':'#166534',.9));cone.position.set(treeX,.95+i*.82,treeZ);cone.castShadow=true;scene.add(cone);}
+            const star=new THREE.Mesh(new THREE.OctahedronGeometry(.32),christmasMaterial('#facc15',.25,.4));star.position.set(treeX,4.45,treeZ);scene.add(star);
+            for(let j=0;j<5;j++){const points=[];for(let k=0;k<=80;k++){const t=k/80,angle=t*Math.PI*5+j*.55,r=1.18-t*.78,y=.48+t*3.3;points.push(new THREE.Vector3(treeX+Math.cos(angle)*r,y,treeZ+Math.sin(angle)*r));}
+                const curve=new THREE.CatmullRomCurve3(points);const wire=new THREE.Mesh(new THREE.TubeGeometry(curve,100,.025,5,false),christmasMaterial('#e8c66b',.4,.3));scene.add(wire);}
+            for(let i=0;i<44;i++){const t=i/44,angle=t*Math.PI*10,r=1.15-t*.75,y=.55+t*3.25;const bulb=new THREE.Mesh(new THREE.SphereGeometry(.055,8,8),new THREE.MeshBasicMaterial({color:[0xffd166,0xff6b6b,0x8be9fd,0xffffff][i%4]}));bulb.position.set(treeX+Math.cos(angle)*r,y,treeZ+Math.sin(angle)*r);scene.add(bulb);christmas3D.bulbs.push(bulb);}
+            // Fenêtre enneigée et petits meubles
+            const windowFrame=new THREE.Mesh(new THREE.BoxGeometry(2.25,1.75,.15),christmasMaterial('#7a4b2c'));windowFrame.position.set(1,3.1,-3.8);scene.add(windowFrame);
+            const windowGlass=new THREE.Mesh(new THREE.PlaneGeometry(2,1.5),new THREE.MeshBasicMaterial({color:0x8db8c7}));windowGlass.position.set(1,3.1,-3.69);scene.add(windowGlass);
+            for(let x=0;x<2;x++){const mullion=new THREE.Mesh(new THREE.BoxGeometry(.06,1.55,.06),christmasMaterial('#e5c18a'));mullion.position.set(1+(x?0:-.98),3.1,-3.6);scene.add(mullion);}
+            const radio=new THREE.Group();const radioBody=new THREE.Mesh(new THREE.BoxGeometry(.9,.55,.38),christmasMaterial('#6b241d'));radio.add(radioBody);
+            const dial=new THREE.Mesh(new THREE.CircleGeometry(.13,18),christmasMaterial('#facc15'));dial.position.set(-.24,0,.2);radio.add(dial);radio.position.set(4.9,.35,.2);radio.userData.action='radio';scene.add(radio);
+            const snowman=new THREE.Group();const snowBody=new THREE.Mesh(new THREE.SphereGeometry(.38,16,12),christmasMaterial('#f8fafc'));snowBody.position.y=.38;snowman.add(snowBody);const snowHead=new THREE.Mesh(new THREE.SphereGeometry(.24,16,12),christmasMaterial('#fff'));snowHead.position.y=.9;snowman.add(snowHead);snowman.position.set(-5,.02,.6);snowman.userData.action='snow';scene.add(snowman);
+            // Cadeaux disposés en arc dans toute la pièce
+            const colors=['#b91c1c','#166534','#1d4ed8','#a16207','#7e22ce','#be123c'];
+            const positions=[];
+            for(let i=0;i<24;i++){const angle=(i/24)*Math.PI*1.8-.9;const radius=3.4+(i%3)*.34;positions.push([Math.sin(angle)*radius,0.28,Math.cos(angle)*radius+.7]);}
+            positions.forEach((p,i)=>christmasBox(scene,.42,.42,.42,colors[i%colors.length],p[0],p[1],p[2],i+1));
+            // Objets lumineux secondaires
+            const ambient=new THREE.PointLight(0xffd9a0,.7,14);ambient.position.set(0,5,3);scene.add(ambient);
+        }
+        function buildChristmasSalon() {
+            const host=document.getElementById('christmas-3d-host');
+            if(!host || !window.THREE)return;
+            if(christmas3D.host===host && christmas3D.renderer)return;
+            disposeChristmasSalon();
+            christmas3D.host=host;christmas3D.flames=[];christmas3D.bulbs=[];
+            const w=Math.max(280,host.clientWidth||640),h=Math.max(360,host.clientHeight||520);
+            const scene=new THREE.Scene();scene.background=new THREE.Color(0x111b17);scene.fog=new THREE.Fog(0x111b17,12,27);
+            const camera=new THREE.PerspectiveCamera(48,w/h,.1,80);camera.position.set(0,5.1,11.8);camera.lookAt(0,1.6,-.4);
+            const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));renderer.setSize(w,h);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+            if('outputColorSpace' in renderer)renderer.outputColorSpace=THREE.SRGBColorSpace;else renderer.outputEncoding=THREE.sRGBEncoding;
+            host.appendChild(renderer.domElement);
+            scene.add(new THREE.HemisphereLight(0xffe9ce,0x1b2b25,1.8));
+            const key=new THREE.DirectionalLight(0xffe4bf,2);key.position.set(-4,8,5);key.castShadow=true;scene.add(key);
+            christmasAddRoom(scene);
+            const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2();
+            christmas3D.renderer=renderer;christmas3D.scene=scene;christmas3D.camera=camera;christmas3D.raycaster=raycaster;christmas3D.mouse=mouse;
+            let downX=0,downY=0,dragged=false;
+            const pointerDown=e=>{downX=e.clientX;downY=e.clientY;dragged=false;};
+            const pointerMove=e=>{if(e.buttons===0)return;const dx=e.clientX-downX,dy=e.clientY-downY;if(Math.abs(dx)+Math.abs(dy)>3)dragged=true;scene.rotation.y+=dx*.004;camera.position.y=Math.max(2.8,Math.min(7,camera.position.y-dy*.008));camera.lookAt(0,1.6,-.4);downX=e.clientX;downY=e.clientY;};
+            const pointerUp=e=>{if(dragged)return;const rect=renderer.domElement.getBoundingClientRect();mouse.x=((e.clientX-rect.left)/rect.width)*2-1;mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;raycaster.setFromCamera(mouse,camera);const hits=raycaster.intersectObjects(scene.children,true);if(!hits.length)return;let obj=hits[0].object;while(obj && obj.userData.giftDay===undefined && !obj.userData.action)obj=obj.parent;if(obj?.userData.giftDay!==undefined)openChristmasBook(obj.userData.giftDay);else if(obj?.userData.action==='radio')christmasToggleMusic();else if(obj?.userData.action==='snow')christmasStartSnowGame();};
+            const wheel=e=>{e.preventDefault();camera.position.z=Math.max(7,Math.min(18,camera.position.z+e.deltaY*.008));camera.lookAt(0,1.6,-.4);};
+            renderer.domElement.addEventListener('pointerdown',pointerDown);renderer.domElement.addEventListener('pointermove',pointerMove);renderer.domElement.addEventListener('pointerup',pointerUp);renderer.domElement.addEventListener('wheel',wheel,{passive:false});
+            christmas3D.pointer={pointerDown,pointerMove,pointerUp,wheel};
+            christmas3D.resize=()=>{if(!christmas3D.renderer||!christmas3D.host?.isConnected)return;const nw=Math.max(280,host.clientWidth),nh=Math.max(360,host.clientHeight);camera.aspect=nw/nh;camera.updateProjectionMatrix();renderer.setSize(nw,nh);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));};
+            window.addEventListener('resize',christmas3D.resize);
+            let last=0;
+            const animate=now=>{if(!christmas3D.renderer)return;christmas3D.frame=requestAnimationFrame(animate);if(now-last>1000){last=now;if(christmas3D.countdownContext){const c=christmas3D.countdownContext;c.fillStyle='#1a100c';c.fillRect(0,0,512,180);c.strokeStyle='#e6bd71';c.lineWidth=10;c.strokeRect(7,7,498,166);c.fillStyle='#f8d98a';c.textAlign='center';c.font='bold 35px Georgia';c.fillText('AVANT NOËL',256,55);c.font='bold 43px Arial';c.fillText(christmasCountdownText(),256,123);christmas3D.countdownTexture.needsUpdate=true;}}
+                const t=now*.001;christmas3D.flames.forEach((f,i)=>{f.scale.y=.72+Math.sin(t*8+i)*.28;f.rotation.z=Math.sin(t*4+i)*.12;});if(christmas3D.fireLight)christmas3D.fireLight.intensity=2.2+Math.sin(t*11)*.55;christmas3D.bulbs.forEach((b,i)=>b.material.opacity=.65+.35*Math.sin(t*3+i));renderer.render(scene,camera);};
+            christmas3D.frame=requestAnimationFrame(animate);
+        }
+        function disposeChristmasSalon() {
+            if(christmas3D.frame)cancelAnimationFrame(christmas3D.frame);
+            if(christmas3D.resize)window.removeEventListener('resize',christmas3D.resize);
+            if(christmas3D.renderer){const canvas=christmas3D.renderer.domElement,p=christmas3D.pointer;if(p){canvas.removeEventListener('pointerdown',p.pointerDown);canvas.removeEventListener('pointermove',p.pointerMove);canvas.removeEventListener('pointerup',p.pointerUp);canvas.removeEventListener('wheel',p.wheel);}christmas3D.renderer.dispose();if(canvas.parentNode)canvas.parentNode.removeChild(canvas);}
+            if(christmas3D.countdownTexture)christmas3D.countdownTexture.dispose();
+            christmasStopMusic();
+            christmas3D={renderer:null,scene:null,camera:null,frame:null,group:null,host:null,resize:null,pointer:null,raycaster:null,mouse:null,flames:[],bulbs:[],countdownTexture:null,countdownCanvas:null,countdownContext:null,lastClock:0,audio:null,audioTimer:null,snowGame:false};
+        }
+        function christmasEnsureModal() {
+            if(document.getElementById('christmas-book-modal'))return;
+            const modal=document.createElement('div');modal.id='christmas-book-modal';modal.className='christmas-modal hidden';
+            modal.innerHTML=`<div class="christmas-book"><div class="flex items-center justify-between gap-3 px-4 py-3 bg-[#6b2c1c] text-amber-100"><div><div class="font-black text-lg">📖 Le livre des veillées de Noël</div><div id="christmas-book-count" class="text-[11px] text-amber-100/70"></div></div><button type="button" onclick="closeChristmasBook()" class="text-2xl px-2" aria-label="Fermer">×</button></div><div id="christmas-book-page" class="christmas-book-page"><div id="christmas-book-content"></div></div><div class="flex items-center justify-between gap-3 p-3 bg-[#ead2a2] border-t border-[#8a5a32]"><button id="christmas-book-prev" type="button" onclick="christmasBookTurn(-1)" class="px-4 py-2 rounded-xl bg-[#7f1d1d] text-white font-bold text-xs">← Page précédente</button><span id="christmas-book-index" class="text-xs font-bold"></span><button id="christmas-book-next" type="button" onclick="christmasBookTurn(1)" class="px-4 py-2 rounded-xl bg-[#14532d] text-white font-bold text-xs">Page suivante →</button></div></div>`;
+            document.body.appendChild(modal);
+            const page=modal.querySelector('#christmas-book-page');let sx=0;
+            page.addEventListener('touchstart',e=>{sx=e.changedTouches[0].clientX;},{passive:true});
+            page.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-sx;if(Math.abs(dx)>45)christmasBookTurn(dx<0?1:-1);},{passive:true});
+            page.addEventListener('pointerdown',e=>{christmasBook.pointerX=e.clientX;christmasBook.dragging=true;});
+            page.addEventListener('pointerup',e=>{if(!christmasBook.dragging)return;const dx=e.clientX-christmasBook.pointerX;christmasBook.dragging=false;if(Math.abs(dx)>70)christmasBookTurn(dx<0?1:-1);});
+        }
+        function openChristmasBook(day) {
+            const available=christmasAvailableDay();
+            if(day>available)return showToast('Cadeau verrouillé',`Le cadeau n°${day} sera disponible le ${day} décembre ${CHRISTMAS_YEAR}.`);
+            christmasEnsureModal();
+            christmasBook={day,page:day,max:available,pointerX:0,pointerY:0,dragging:false};
+            renderChristmasBookPage();
+            document.getElementById('christmas-book-modal').classList.remove('hidden');
+        }
+        function closeChristmasBook(){const m=document.getElementById('christmas-book-modal');if(m)m.classList.add('hidden');}
+        function christmasBookTurn(delta){const next=christmasBook.page+delta;if(next<1||next>christmasBook.max)return;christmasBook.page=next;renderChristmasBookPage();}
+        function renderChristmasBookPage() {
+            const chapter=CHRISTMAS_STORY[christmasBook.page-1];if(!chapter)return;
+            const dayKey=`${CHRISTMAS_YEAR}-12-${String(christmasBook.page).padStart(2,'0')}`;
+            const draws=(DB.get('christmas_draws')||{days:{}}).days||{};
+            const draw=draws[dayKey],me=getCurrentUser();
+            const isWinner=!!(draw&&me&&draw.winnerUsername===me.username);
+            document.getElementById('christmas-book-count').textContent=`Calendrier de l’Avent · Chapitre ${christmasBook.page} sur 24`;
+            document.getElementById('christmas-book-content').innerHTML=`<div class="text-center text-xs uppercase tracking-[.25em] text-[#9a6b3e] mb-4">✦ ${CHRISTMAS_YEAR} · Val-des-Pins ✦</div><h3>${escapeHtml(chapter[0])}</h3><p>${escapeHtml(chapter[1])}</p><div class="mt-8 text-center text-sm text-[#8a5a32]">❄ ✦ ❄</div>${isWinner?'<div class="christmas-ribbon">🎁 Une surprise t’attend ! Tu as été tiré(e) au sort aujourd’hui. Va voir Charles, le délégué, dans la vraie vie pour récupérer ton cadeau.</div>':''}`;
+            document.getElementById('christmas-book-index').textContent=`${christmasBook.page} / ${christmasBook.max}`;
+            document.getElementById('christmas-book-prev').disabled=christmasBook.page<=1;
+            document.getElementById('christmas-book-next').disabled=christmasBook.page>=christmasBook.max;
+            document.getElementById('christmas-book-prev').style.opacity=christmasBook.page<=1?'.4':'1';
+            document.getElementById('christmas-book-next').style.opacity=christmasBook.page>=christmasBook.max?'.4':'1';
+            document.getElementById('christmas-book-page').scrollTop=0;
+        }
+        function christmasToggleMusic() {
+            if(christmas3D.audio){christmasStopMusic();showToast('Radio arrêtée','La musique de Noël est arrêtée.');return;}
+            try{
+                const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return showToast('Audio indisponible','Ce navigateur ne prend pas en charge la lecture audio.');
+                const ctx=new AudioCtx();christmas3D.audio=ctx;
+                const notes=[523.25,659.25,783.99,659.25,587.33,698.46,783.99,698.46,523.25,587.33,659.25,523.25];
+                let index=0;
+                const play=()=>{if(!christmas3D.audio)return;const osc=ctx.createOscillator(),gain=ctx.createGain();osc.type='sine';osc.frequency.value=notes[index++%notes.length];gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.07,ctx.currentTime+.03);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.34);osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.36);};
+                play();christmas3D.audioTimer=setInterval(play,390);showToast('Radio de Noël','Une mélodie originale se joue dans le salon.');
+            }catch(e){showToast('Audio indisponible','Impossible de démarrer la radio sur cet appareil.');}
+        }
+        function christmasStopMusic(){if(christmas3D.audioTimer)clearInterval(christmas3D.audioTimer);christmas3D.audioTimer=null;if(christmas3D.audio){christmas3D.audio.close().catch(()=>{});christmas3D.audio=null;}}
+        function christmasStartSnowGame() {
+            const host=document.getElementById('christmas-3d-host');if(!host)return;
+            if(host.querySelector('.christmas-snow-game'))return;
+            const game=document.createElement('div');game.className='christmas-snow-game';
+            let score=0;game.innerHTML=`<div class="col-span-4 text-center text-amber-100 font-black">Attrape les 8 flocons ! <span id="christmas-snow-score">0/8</span><button type="button" onclick="this.closest('.christmas-snow-game').remove()" class="float-right text-xl">×</button></div>`;
+            for(let i=0;i<8;i++){const b=document.createElement('button');b.type='button';b.textContent='❄️';b.setAttribute('aria-label','Attraper un flocon');b.onclick=()=>{if(b.disabled)return;b.disabled=true;b.textContent='✨';score++;const label=game.querySelector('#christmas-snow-score');if(label)label.textContent=`${score}/8`;if(score===8){const h=game.querySelector('.col-span-4');if(h){h.textContent='🎉 Bravo ! Tu as rattrapé tous les flocons. ';const close=document.createElement('button');close.type='button';close.textContent='Fermer';close.className='ml-2 underline';close.onclick=()=>game.remove();h.appendChild(close);}}};game.appendChild(b);}
+            host.appendChild(game);
+        }
+        async function adminToggleChristmasSalon() {
+            if(!isAdmin())return alert('Action réservée à l’administration.');
+            const cfg=DB.get('christmas_salon_config')||{enabled:false};
+            await DB.set('christmas_salon_config',{enabled:!cfg.enabled,updatedAt:new Date().toISOString()});
+            showToast(!cfg.enabled?'Salon activé':'Salon désactivé',!cfg.enabled?'Le salon 3D est visible sur l’accueil.':'Le salon 3D est masqué sur l’accueil.');
+            render();
+        }
+        function renderChristmasDrawAdmin() {
+            const days=(DB.get('christmas_draws')||{days:{}}).days||{};
+            const entries=Object.entries(days).sort((a,b)=>b[0].localeCompare(a[0]));
+            return `<div class="dyn-card border p-6 rounded-3xl space-y-4">
+                <div><h3 class="font-black text-amber-300 text-sm"><i class="fa-solid fa-gift mr-2"></i>Suivi des tirages de Noël</h3><p class="text-[11px] text-amber-200/60 mt-1">Tirages quotidiens du 1er au 18 décembre 2026, week-ends inclus. Un utilisateur ne peut gagner qu’une seule fois sur la période.</p></div>
+                <div class="p-3 rounded-xl border border-amber-500/30 bg-stone-900 text-[11px] text-amber-100/80">Le calendrier des tirages est alimenté par les Cloud Functions. Si aucun tirage n’apparaît, vérifie que les fonctions serveur ont été déployées.</div>
+                ${entries.length?entries.map(([date,d])=>`<div class="p-4 bg-stone-900 border rounded-2xl flex flex-col sm:flex-row gap-3 sm:items-center justify-between"><div><p class="font-black text-amber-200">${new Date(date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</p><p class="text-xs text-amber-100 mt-1">🎁 ${escapeHtml(d.winnerUsername||'Gagnant inconnu')}</p></div><label class="flex items-center gap-2 text-xs font-bold text-amber-100"><input type="checkbox" ${d.delivered?'checked':''} onchange="adminSetChristmasDelivered('${jsAttr(date)}',this.checked)" class="w-5 h-5 accent-green-500"> Cadeau remis à l’élève <span class="${d.delivered?'text-green-300':'text-red-300'}">(${d.delivered?'Oui':'Non'})</span></label></div>`).join(''):'<p class="text-center py-8 text-amber-200/60 text-xs">Aucun tirage enregistré pour le moment.</p>'}
+            </div>`;
+        }
+        async function adminSetChristmasDelivered(date,delivered) {
+            if(!isAdmin())return alert('Action réservée à l’administration.');
+            try{await christmasFunctions.httpsCallable('setChristmasGiftDelivered')({date,delivered:!!delivered});showToast('Suivi mis à jour','La remise du cadeau a été enregistrée.');}
+            catch(e){console.error(e);showToast('Mise à jour impossible',e.message||'Vérifie le déploiement des Cloud Functions.');}
         }
 
         auth.onAuthStateChanged(async (fbUser) => {
