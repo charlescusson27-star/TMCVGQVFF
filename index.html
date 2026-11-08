@@ -539,6 +539,8 @@
         function canManageLearning(user = getCurrentUser()) { return isAdmin(user) || isProf(user); }
         function canAccessCVL(user = getCurrentUser()) { return isAdmin(user) || isProf(user); }
         function escapeHtml(value) { return String(value ?? '').replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch])); }
+        // Échappe une valeur pour l'insérer dans une chaîne JS à l'intérieur d'un attribut onclick="..." (anti-injection)
+        function jsAttr(value) { return String(value ?? '').replace(/[\\'"<>&\n\r\u2028\u2029]/g, c => { const n = c.charCodeAt(0); return n < 256 ? '\\x' + n.toString(16).padStart(2, '0') : '\\u' + n.toString(16).padStart(4, '0'); }); }
         function safeHttpUrl(value) { try { const u = new URL(String(value || '').trim()); return ['http:', 'https:'].includes(u.protocol) ? u.href : ''; } catch (_) { return ''; } }
         async function normalizeLegacyRoles() {
             let users = DB.get('users') || [], changed = false;
@@ -608,13 +610,13 @@
                                 <div class="p-2 bg-amber-500/20 text-amber-400 rounded-xl"><i class="fa-solid fa-circle-info"></i></div>
                                 <div class="flex-1">
                                     <div class="flex justify-between items-center">
-                                        <h4 class="font-bold text-amber-200 text-sm">${n.title}</h4>
-                                        <span class="text-[10px] text-amber-200/50">${n.date}</span>
+                                        <h4 class="font-bold text-amber-200 text-sm">${escapeHtml(n.title)}</h4>
+                                        <span class="text-[10px] text-amber-200/50">${escapeHtml(n.date)}</span>
                                     </div>
-                                    <p class="text-amber-100 mt-1">${n.message}</p>
+                                    <p class="text-amber-100 mt-1">${escapeHtml(n.message)}</p>
                                 </div>
                             </div>
-                            <button onclick="deleteNotification('${n.id}')" title="Supprimer cette notification" class="p-2 text-stone-400 hover:text-red-400 transition rounded-lg hover:bg-stone-900">
+                            <button onclick="deleteNotification('${jsAttr(n.id)}')" title="Supprimer cette notification" class="p-2 text-stone-400 hover:text-red-400 transition rounded-lg hover:bg-stone-900">
                                 <i class="fa-solid fa-trash text-sm"></i>
                             </button>
                         </div>
@@ -654,6 +656,12 @@
 
         function openFileViewer(title, url, type) {
             if (!url) return showToast("Lien indisponible", "Aucun lien de fichier n'a été enregistré.");
+            // Sécurité : seules les URL http(s), blob: et data: (image/PDF) sont acceptées
+            const rawUrl = String(url).trim();
+            const isDataOk = /^data:(image\/(png|jpe?g|gif|webp)|application\/pdf)[;,]/i.test(rawUrl);
+            const httpUrl = safeHttpUrl(rawUrl);
+            url = httpUrl || (isDataOk || /^blob:/i.test(rawUrl) ? rawUrl : '');
+            if (!url) return showToast("Lien indisponible", "Ce lien n'est pas autorisé.");
             document.getElementById('viewer-title').textContent = title;
             document.getElementById('viewer-download-btn').href = url;
             document.getElementById('viewer-open-tab').href = url;
@@ -661,12 +669,22 @@
             const cleanUrl = String(url).split('?')[0].toLowerCase();
             const isPdf = (type && type.includes('pdf')) || cleanUrl.endsWith('.pdf');
             const isImage = (type && type.startsWith('image/')) || /\.(png|jpe?g|gif|webp|svg)$/i.test(cleanUrl);
+            c.innerHTML = '';
             if (isPdf) {
-                c.innerHTML = `<embed src="${url}" type="application/pdf" width="100%" height="100%" />`;
+                const el = document.createElement('embed');
+                el.src = url; el.type = 'application/pdf'; el.width = '100%'; el.height = '100%';
+                c.appendChild(el);
             } else if (isImage) {
-                c.innerHTML = `<img src="${url}" class="max-h-full object-contain rounded-xl" onerror="this.remove(); this.parentElement.innerHTML='<div class=\'text-amber-200/60 text-center p-6\'>Aperçu indisponible pour ce lien. Utilisez le bouton Ouvrir.</div>'">`;
+                const el = document.createElement('img');
+                el.src = url; el.className = 'max-h-full object-contain rounded-xl';
+                el.onerror = () => { el.remove(); c.innerHTML = '<div class="text-amber-200/60 text-center p-6">Aperçu indisponible pour ce lien. Utilisez le bouton Ouvrir.</div>'; };
+                c.appendChild(el);
+            } else if (httpUrl) {
+                const el = document.createElement('iframe');
+                el.src = url; el.width = '100%'; el.height = '100%'; el.className = 'rounded-xl border border-amber-900/40';
+                c.appendChild(el);
             } else {
-                c.innerHTML = `<iframe src="${url}" width="100%" height="100%" class="rounded-xl border border-amber-900/40"></iframe>`;
+                c.innerHTML = '<div class="text-amber-200/60 text-center p-6">Aperçu indisponible pour ce lien. Utilisez le bouton Ouvrir.</div>';
             }
             toggleModal('file-viewer-modal', true);
         }
@@ -739,7 +757,7 @@
                     <h1 class="text-base font-bold text-amber-400">Première connexion</h1>
                     <p class="text-amber-200/70 text-[11px]">Merci de renseigner vos informations pour finaliser votre profil.</p>
                     <form onsubmit="saveSetup(event)" class="space-y-3">
-                        <div><label class="block font-bold text-amber-300">Nom & Prénom réels *</label><input type="text" id="s-realname" value="${user.realName || ''}" required class="w-full p-2.5 bg-stone-900 border rounded-xl text-white"></div>
+                        <div><label class="block font-bold text-amber-300">Nom & Prénom réels *</label><input type="text" id="s-realname" value="${escapeHtml(user.realName || '')}" required class="w-full p-2.5 bg-stone-900 border rounded-xl text-white"></div>
                         <div><label class="block font-bold text-amber-300">Ton vrai e-mail *</label><input type="email" id="s-email" required autocomplete="email" class="w-full p-2.5 bg-stone-900 border rounded-xl text-white" placeholder="ton.email@exemple.com"><p class="text-[10px] text-amber-200/60 mt-1">Un lien de confirmation y sera envoyé. Une fois confirmé, c'est avec cette adresse que tu te connecteras, et elle servira pour « Mot de passe oublié ».</p></div>
                         <div><label class="block font-bold text-amber-300">Date de naissance *</label><input type="date" id="s-bdate" value="${user.birthDate || ''}" required class="w-full p-2.5 bg-stone-900 border rounded-xl text-white"></div>
                         <button type="submit" class="w-full py-3 dyn-btn text-white font-bold rounded-xl mt-2">Valider et Entrer sur LE QG</button>
@@ -762,8 +780,8 @@
                         <div class="flex items-center gap-2">
                             ${renderAvatarBadge(user)}
                             <div>
-                                <div class="font-black text-amber-400 text-xs">${user.pseudo || user.username}</div>
-                                <div class="text-[9px] text-amber-200/60">${user.realName || user.username}</div>
+                                <div class="font-black text-amber-400 text-xs">${escapeHtml(user.pseudo || user.username)}</div>
+                                <div class="text-[9px] text-amber-200/60">${escapeHtml(user.realName || user.username)}</div>
                             </div>
                         </div>
                     </div>
@@ -1652,9 +1670,8 @@
             let y = 18;
 
             const cleanText = (value) => {
-                const div = document.createElement('div');
-                div.innerHTML = String(value || '').replace(/<br\s*\/?>(?=)/gi, '\n');
-                return (div.textContent || div.innerText || '').replace(/\u00a0/g, ' ').trim();
+                const doc = new DOMParser().parseFromString(String(value || '').replace(/<br\s*\/?>(?=)/gi, '\n'), 'text/html');
+                return (doc.body.textContent || '').replace(/\u00a0/g, ' ').trim();
             };
 
             const ensureSpace = (height) => {
@@ -1759,7 +1776,7 @@
                         <div class="dyn-card border p-4 rounded-2xl flex justify-between items-center">
                             <label class="font-bold text-amber-200">Sélectionner un calcul :</label>
                             <select onchange="state.selectedCalcId=this.value;render()" class="p-2.5 bg-stone-900 border rounded-xl text-amber-100 font-bold w-72">
-                                ${calcs.map(c => `<option value="${c.id}" ${currentCalc && currentCalc.id===c.id?'selected':''}>${c.title} (${c.category})</option>`).join('')}
+                                ${calcs.map(c => `<option value="${c.id}" ${currentCalc && currentCalc.id===c.id?'selected':''}>${escapeHtml(c.title)} (${c.category})</option>`).join('')}
                             </select>
                         </div>
 
@@ -1769,9 +1786,9 @@
                                     <div class="border-b border-amber-900/40 pb-4 flex justify-between items-start">
                                         <div>
                                             <span class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">${currentCalc.category}</span>
-                                            <h3 class="text-2xl font-black text-white mt-2">${currentCalc.title}</h3>
+                                            <h3 class="text-2xl font-black text-white mt-2">${escapeHtml(currentCalc.title)}</h3>
                                         </div>
-                                        <button onclick="exportFicheMethodPDF('calc', '${currentCalc.id}')" class="bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg">
+                                        <button onclick="exportFicheMethodPDF('calc', '${jsAttr(currentCalc.id)}')" class="bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg">
                                             <i class="fa-solid fa-file-pdf"></i> Exporter PDF
                                         </button>
                                     </div>
@@ -1837,12 +1854,12 @@
                             ${filteredGenerals.map(g => `
                                 <div class="dyn-card border p-5 rounded-3xl space-y-3">
                                     <div class="flex justify-between items-start">
-                                        <span class="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${g.subject}</span>
+                                        <span class="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${escapeHtml(g.subject)}</span>
                                     </div>
-                                    <h4 class="text-base font-black text-amber-300">${g.title}</h4>
-                                    <p class="text-xs text-amber-200/80 italic">${g.intro}</p>
-                                    <div class="bg-stone-900/80 p-3 rounded-2xl text-xs text-amber-100 whitespace-pre-line border border-amber-900/40 leading-relaxed">${g.content}</div>
-                                    <button onclick="exportFicheMethodPDF('general', '${g.id}')" class="w-full bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg">
+                                    <h4 class="text-base font-black text-amber-300">${escapeHtml(g.title)}</h4>
+                                    <p class="text-xs text-amber-200/80 italic">${escapeHtml(g.intro)}</p>
+                                    <div class="bg-stone-900/80 p-3 rounded-2xl text-xs text-amber-100 whitespace-pre-line border border-amber-900/40 leading-relaxed">${escapeHtml(g.content)}</div>
+                                    <button onclick="exportFicheMethodPDF('general', '${jsAttr(g.id)}')" class="w-full bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg">
                                         <i class="fa-solid fa-file-pdf"></i> Exporter PDF
                                     </button>
                                 </div>
@@ -1883,9 +1900,9 @@
                         <div class="dyn-card border border-red-500/40 p-5 rounded-2xl space-y-2">
                             <div class="flex justify-between items-center border-b border-red-900/40 pb-2">
                                 <h3 class="font-bold text-red-400 text-sm">Action : ${s.type}</h3>
-                                <span class="text-[10px] text-amber-200/50">${s.date}</span>
+                                <span class="text-[10px] text-amber-200/50">${escapeHtml(s.date)}</span>
                             </div>
-                            <p class="text-amber-100 font-medium"><b>Motif :</b> ${s.reason}</p>
+                            <p class="text-amber-100 font-medium"><b>Motif :</b> ${escapeHtml(s.reason)}</p>
                             ${s.deductedPoints > 0 ? `<div class="text-red-400 font-black">- ${s.deductedPoints} points retirés de votre score</div>` : ''}
                         </div>
                     `).join('')}
@@ -1937,10 +1954,10 @@
                             <div class="dyn-card border p-5 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                 <div>
                                     <div class="flex items-center gap-2">
-                                        <h3 class="font-bold text-amber-300 text-sm">${q.title}</h3>
+                                        <h3 class="font-bold text-amber-300 text-sm">${escapeHtml(q.title)}</h3>
                                         <span class="px-2 py-0.5 bg-stone-800 text-amber-200 rounded text-[10px]">${q.type === 'quiz' ? 'Quiz' : 'Défi / Tâche'}</span>
                                     </div>
-                                    <p class="text-amber-100 mt-1">${q.description}</p>
+                                    <p class="text-amber-100 mt-1">${escapeHtml(q.description)}</p>
                                     <div class="text-[10px] text-amber-400 font-bold mt-1">Récompense indicative : ${q.points} pts</div>
                                 </div>
                                 <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -1948,7 +1965,7 @@
                                     ${sub ? `
                                         <button disabled class="px-4 py-2 bg-stone-800 text-stone-500 font-bold rounded-xl cursor-not-allowed">Effectué ce mois</button>
                                     ` : `
-                                        <button onclick="state.activeQuestId='${q.id}';render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl">Participer</button>
+                                        <button onclick="state.activeQuestId='${jsAttr(q.id)}';render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl">Participer</button>
                                     `}
                                 </div>
                             </div>
@@ -1961,12 +1978,12 @@
         function renderQuestSubmissionForm(user, quest) {
             return `<div class="max-w-2xl mx-auto dyn-card border p-8 rounded-3xl space-y-6 text-xs shadow-2xl">
                 <div class="flex justify-between items-center border-b border-amber-900/40 pb-3">
-                    <h2 class="text-base font-black text-amber-400">Répondre au Défi : ${quest.title}</h2>
+                    <h2 class="text-base font-black text-amber-400">Répondre au Défi : ${escapeHtml(quest.title)}</h2>
                     <button onclick="state.activeQuestId=null;render()" class="px-3 py-1 bg-stone-900 text-amber-200 border rounded-xl font-bold">Retour</button>
                 </div>
-                <p class="text-amber-100">${quest.description}</p>
+                <p class="text-amber-100">${escapeHtml(quest.description)}</p>
                 
-                <form onsubmit="submitQuestWork(event, '${quest.id}')" class="space-y-4">
+                <form onsubmit="submitQuestWork(event, '${jsAttr(quest.id)}')" class="space-y-4">
                     <div>
                         <label class="block font-bold text-amber-200 mb-1">Lien vers votre travail ou votre ressource :</label>
                         <input type="url" id="quest-link-inp" ${quest.requireLink ? 'required' : ''} placeholder="https://..." class="w-full p-2.5 bg-stone-900 border rounded-xl text-amber-100">
@@ -2036,13 +2053,13 @@
         function renderQuestQuizPlayer(user, quest) {
             return `<div class="max-w-2xl mx-auto dyn-card border p-8 rounded-3xl space-y-6 text-xs shadow-2xl">
                 <div class="flex justify-between items-center border-b border-amber-900/40 pb-3">
-                    <h2 class="text-base font-black text-amber-400">Quiz (Défi) : ${quest.title}</h2>
+                    <h2 class="text-base font-black text-amber-400">Quiz (Défi) : ${escapeHtml(quest.title)}</h2>
                     <button onclick="state.activeQuestId=null;render()" class="px-3 py-1 bg-stone-900 text-amber-200 border rounded-xl font-bold">Quitter</button>
                 </div>
-                <form onsubmit="submitQuestQuizForm(event, '${quest.id}')" class="space-y-6">
+                <form onsubmit="submitQuestQuizForm(event, '${jsAttr(quest.id)}')" class="space-y-6">
                     ${quest.questions.map((q, qIdx) => `
                         <div class="p-4 bg-stone-900/80 rounded-2xl border space-y-3">
-                            <h4 class="font-bold text-amber-200 text-sm">Question ${qIdx + 1} : ${q.text}</h4>
+                            <h4 class="font-bold text-amber-200 text-sm">Question ${qIdx + 1} : ${escapeHtml(q.text)}</h4>
                             <div class="space-y-2">
                                 ${q.options.map((opt, oIdx) => `
                                     <label class="flex items-center gap-3 p-3 bg-stone-950 border rounded-xl cursor-pointer hover:border-amber-400 transition">
@@ -2212,8 +2229,8 @@
                                 <div class="dyn-card border p-5 rounded-2xl flex flex-col justify-between space-y-3">
                                     <div>
                                         <div class="flex justify-between items-start gap-2">
-                                            <h4 class="font-bold text-amber-300 text-sm">${q.title}</h4>
-                                            <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${q.subject || 'Général'}</span>
+                                            <h4 class="font-bold text-amber-300 text-sm">${escapeHtml(q.title)}</h4>
+                                            <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${escapeHtml(q.subject || 'Général')}</span>
                                         </div>
                                         <p class="text-[10px] text-amber-200/60 mt-1">${q.questions.length} question(s) - ${pointsPerQuestion} pts/question (${maxPts} pts max)</p>
                                     </div>
@@ -2225,7 +2242,7 @@
                                                 <div class="text-xs font-black text-amber-400">${sub.score} / ${sub.total} (${pct}%)</div>
                                             ` : '<span class="text-[10px] text-amber-200/40 italic">Non effectué</span>'}
                                         </div>
-                                        <button onclick="state.activeQuizId='${q.id}';render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl text-xs">
+                                        <button onclick="state.activeQuizId='${jsAttr(q.id)}';render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl text-xs">
                                             ${sub !== undefined ? 'Refaire le Quiz' : 'Commencer'}
                                         </button>
                                     </div>
@@ -2242,16 +2259,16 @@
             return `<div class="max-w-2xl mx-auto dyn-card border p-8 rounded-3xl space-y-6 text-xs shadow-2xl">
                 <div class="flex justify-between items-center border-b border-amber-900/40 pb-3">
                     <div>
-                        <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${quiz.subject || 'Général'} (${ptsPerQ} pts/q)</span>
-                        <h2 class="text-lg font-black text-amber-400 mt-1">${quiz.title}</h2>
+                        <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${escapeHtml(quiz.subject || 'Général')} (${ptsPerQ} pts/q)</span>
+                        <h2 class="text-lg font-black text-amber-400 mt-1">${escapeHtml(quiz.title)}</h2>
                     </div>
                     <button onclick="state.activeQuizId=null;render()" class="px-3 py-1 bg-stone-900 text-amber-200 border rounded-xl font-bold">Quitter</button>
                 </div>
 
-                <form onsubmit="submitQuizForm(event, '${quiz.id}')" class="space-y-6">
+                <form onsubmit="submitQuizForm(event, '${jsAttr(quiz.id)}')" class="space-y-6">
                     ${quiz.questions.map((q, qIdx) => `
                         <div class="p-4 bg-stone-900/80 rounded-2xl border space-y-3">
-                            <h4 class="font-bold text-amber-200 text-sm">Question ${qIdx + 1} : ${q.text}</h4>
+                            <h4 class="font-bold text-amber-200 text-sm">Question ${qIdx + 1} : ${escapeHtml(q.text)}</h4>
                             <div class="space-y-2">
                                 ${q.options.map((opt, oIdx) => `
                                     <label class="flex items-center gap-3 p-3 bg-stone-950 border rounded-xl cursor-pointer hover:border-amber-400 transition">
@@ -2326,7 +2343,7 @@
                 <div class="flex justify-between items-center border-b border-amber-900/40 pb-4">
                     <div>
                         <span class="px-2.5 py-1 bg-amber-500/20 text-amber-400 rounded-full font-bold text-[10px]">Corrigé Détaillé</span>
-                        <h2 class="text-xl font-black text-amber-300 mt-1">${data.title}</h2>
+                        <h2 class="text-xl font-black text-amber-300 mt-1">${escapeHtml(data.title)}</h2>
                     </div>
                     <button onclick="state.quizReviewData=null;render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl">Fermer le Corrigé</button>
                 </div>
@@ -2348,7 +2365,7 @@
                         return `
                             <div class="p-4 rounded-2xl border ${isCorrect ? 'bg-green-950/40 border-green-500/40' : 'bg-red-950/40 border-red-500/40'} space-y-3">
                                 <div class="flex justify-between items-start gap-2">
-                                    <h4 class="font-bold text-amber-100 text-sm">Question ${idx + 1} : ${q.text}</h4>
+                                    <h4 class="font-bold text-amber-100 text-sm">Question ${idx + 1} : ${escapeHtml(q.text)}</h4>
                                     <span class="px-2 py-1 rounded text-[10px] font-bold ${isCorrect ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}">
                                         ${isCorrect ? 'Correct ✅' : 'Incorrect ❌'}
                                     </span>
@@ -2400,7 +2417,7 @@
                         return `
                             <div class="dyn-card border p-6 rounded-3xl space-y-4">
                                 <div class="flex justify-between items-center">
-                                    <h3 class="font-bold text-amber-300 text-sm">${p.question}</h3>
+                                    <h3 class="font-bold text-amber-300 text-sm">${escapeHtml(p.question)}</h3>
                                     <span class="px-2.5 py-1 rounded text-[10px] font-bold ${isExpired ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'}">${isExpired ? 'Sondage Terminé' : 'En cours'}</span>
                                 </div>
                                 <div class="space-y-2">
@@ -2409,7 +2426,7 @@
                                         return `
                                             <div class="p-3 bg-stone-900 rounded-xl border space-y-1">
                                                 <div class="flex justify-between items-center font-bold text-amber-100">
-                                                    <span>${opt.text}</span>
+                                                    <span>${escapeHtml(opt.text)}</span>
                                                     ${isExpired || hasVoted ? `<span>${opt.votes || 0} vote(s) (${pct}%)</span>` : `<button onclick="votePoll(${pIdx}, ${oIdx})" class="px-3 py-1 dyn-btn text-white rounded-lg text-[10px]">Voter</button>`}
                                                 </div>
                                                 ${isExpired || hasVoted ? `<div class="w-full bg-stone-950 h-2 rounded-full overflow-hidden border"><div class="bg-amber-500 h-full" style="width: ${pct}%"></div></div>` : ''}
@@ -2461,7 +2478,7 @@
             return `
                 <div class="p-5 bg-stone-900 rounded-2xl border ${isWeekly ? 'border-amber-500/40' : ''} space-y-4">
                     <div class="flex justify-between items-center gap-3">
-                        <h4 class="font-black text-sm text-amber-300">${isWeekly ? '⭐ Grille Hebdomadaire : ' : ''}${grid.title} (${grid.words.length} mots)</h4>
+                        <h4 class="font-black text-sm text-amber-300">${isWeekly ? '⭐ Grille Hebdomadaire : ' : ''}${escapeHtml(grid.title)} (${grid.words.length} mots)</h4>
                         <span class="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${grid.pointsPerWord || 1} pts par mot trouvé</span>
                     </div>
                     ${played ? `<p class="text-amber-200/60 font-bold">Cette grille a déjà été validée cette semaine. Elle sera de nouveau disponible la semaine prochaine.</p>` : `
@@ -2473,7 +2490,7 @@
                                 </div>
                             `).join('')}
                         </div>
-                        <button onclick="validateCrosswordGrid('${grid.id}')" class="w-full py-3 dyn-btn text-white font-bold rounded-xl">Valider toute la grille</button>
+                        <button onclick="validateCrosswordGrid('${jsAttr(grid.id)}')" class="w-full py-3 dyn-btn text-white font-bold rounded-xl">Valider toute la grille</button>
                     `}
                 </div>
             `;
@@ -2545,19 +2562,19 @@
                         <div class="space-y-2 max-h-96 overflow-y-auto pr-2">
                             ${userNotes.length === 0 ? '<p class="text-amber-200/50 italic">Aucun document.</p>' : ''}
                             ${userNotes.map(n => `
-                                <div onclick="selectNote('${n.id}')" class="p-3 rounded-2xl border cursor-pointer ${activeNote && activeNote.id===n.id?'bg-amber-500/20 border-amber-400':'bg-stone-900 border-amber-900/30'}">
-                                    <h4 class="font-bold text-amber-100">${n.title || 'Sans titre'}</h4>
-                                    <p class="text-[10px] text-amber-200/60">Modifié le ${n.date}</p>
+                                <div onclick="selectNote('${jsAttr(n.id)}')" class="p-3 rounded-2xl border cursor-pointer ${activeNote && activeNote.id===n.id?'bg-amber-500/20 border-amber-400':'bg-stone-900 border-amber-900/30'}">
+                                    <h4 class="font-bold text-amber-100">${escapeHtml(n.title || 'Sans titre')}</h4>
+                                    <p class="text-[10px] text-amber-200/60">Modifié le ${escapeHtml(n.date)}</p>
                                 </div>
                             `).join('')}
                         </div>
                         <div class="md:col-span-2 space-y-3">
                             ${activeNote ? `
-                                <input type="text" id="doc-title" value="${activeNote.title}" placeholder="Titre du document..." class="w-full p-3 bg-stone-900 border rounded-xl text-amber-100 font-bold">
-                                <textarea id="doc-content" placeholder="Rédige ton cours ici..." class="w-full p-4 bg-stone-900 border rounded-2xl h-64 resize-none text-amber-100 leading-relaxed font-mono">${activeNote.content}</textarea>
+                                <input type="text" id="doc-title" value="${escapeHtml(activeNote.title)}" placeholder="Titre du document..." class="w-full p-3 bg-stone-900 border rounded-xl text-amber-100 font-bold">
+                                <textarea id="doc-content" placeholder="Rédige ton cours ici..." class="w-full p-4 bg-stone-900 border rounded-2xl h-64 resize-none text-amber-100 leading-relaxed font-mono">${escapeHtml(activeNote.content)}</textarea>
                                 <div class="flex gap-2">
-                                    <button onclick="saveActiveNote('${activeNote.id}')" class="flex-1 py-3 dyn-btn text-white font-bold rounded-xl">Enregistrer le document</button>
-                                    <button onclick="deleteNote('${activeNote.id}')" class="px-4 py-3 bg-red-900/40 text-red-300 border border-red-500/30 font-bold rounded-xl">Supprimer</button>
+                                    <button onclick="saveActiveNote('${jsAttr(activeNote.id)}')" class="flex-1 py-3 dyn-btn text-white font-bold rounded-xl">Enregistrer le document</button>
+                                    <button onclick="deleteNote('${jsAttr(activeNote.id)}')" class="px-4 py-3 bg-red-900/40 text-red-300 border border-red-500/30 font-bold rounded-xl">Supprimer</button>
                                 </div>
                             ` : '<div class="h-64 flex items-center justify-center text-amber-200/50 italic">Sélectionne un document ou crée-en un nouveau.</div>'}
                         </div>
@@ -2648,10 +2665,10 @@
                     ${visibleDecks.map(d => `
                         <div class="dyn-card border p-5 rounded-2xl flex justify-between items-center">
                             <div>
-                                <h3 class="font-bold text-amber-300 text-sm">${d.title} ${d.isPublic?'<span class="text-[9px] bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full ml-2">Public</span>':'<span class="text-[9px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full ml-2">Privé</span>'}</h3>
-                                <p class="text-[10px] text-amber-200/60">${d.cards.length} carte(s) - Créé par ${d.author}</p>
+                                <h3 class="font-bold text-amber-300 text-sm">${escapeHtml(d.title)} ${d.isPublic?'<span class="text-[9px] bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full ml-2">Public</span>':'<span class="text-[9px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full ml-2">Privé</span>'}</h3>
+                                <p class="text-[10px] text-amber-200/60">${d.cards.length} carte(s) - Créé par ${escapeHtml(d.author)}</p>
                             </div>
-                            <button onclick="state.activeDeckId='${d.id}';state.activeCardIndex=0;render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl">Réviser</button>
+                            <button onclick="state.activeDeckId='${jsAttr(d.id)}';state.activeCardIndex=0;render()" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl">Réviser</button>
                         </div>
                     `).join('')}
                 </div>
@@ -2802,7 +2819,7 @@
 
             return `<div class="max-w-3xl mx-auto space-y-4 text-xs">
                 <div class="dyn-card border p-6 rounded-3xl text-center"><h2 class="text-xl font-black text-amber-400"><i class="fa-solid fa-trophy mr-2"></i>Classement Classe (Hors Admin)</h2></div>
-                <div class="space-y-2">${sorted.map((s, idx) => `<div class="dyn-card border p-4 rounded-2xl flex justify-between items-center"><span class="font-bold text-amber-400">#${idx+1} ${s.pseudo}</span><span class="font-bold text-white">${s.score} pts</span></div>`).join('')}</div>
+                <div class="space-y-2">${sorted.map((s, idx) => `<div class="dyn-card border p-4 rounded-2xl flex justify-between items-center"><span class="font-bold text-amber-400">#${idx+1} ${escapeHtml(s.pseudo)}</span><span class="font-bold text-white">${s.score} pts</span></div>`).join('')}</div>
             </div>`;
         }
 
@@ -2814,10 +2831,10 @@
                     <h2 class="text-base font-black text-amber-400">Messagerie</h2>
                     <div class="flex gap-2">
                         <button onclick="state.chatMode='general';state.targetUser=null;render()" class="px-3 py-1.5 ${state.chatMode==='general'?'dyn-btn text-white':'bg-stone-900'} rounded-xl font-bold">Général</button>
-                        <select onchange="state.chatMode='private';state.targetUser=this.value;render()" class="p-1.5 bg-stone-900 border rounded-xl text-amber-300 font-bold"><option value="">Message Privé...</option>${users.filter(x => x.username !== user.username).map(x => `<option value="${x.username}" ${state.targetUser===x.username?'selected':''}>${x.pseudo||x.username}</option>`).join('')}</select>
+                        <select onchange="state.chatMode='private';state.targetUser=this.value;render()" class="p-1.5 bg-stone-900 border rounded-xl text-amber-300 font-bold"><option value="">Message Privé...</option>${users.filter(x => x.username !== user.username).map(x => `<option value="${escapeHtml(x.username)}" ${state.targetUser===x.username?'selected':''}>${escapeHtml(x.pseudo||x.username)}</option>`).join('')}</select>
                     </div>
                 </div>
-                <div class="flex-1 overflow-y-auto space-y-3 p-3 bg-stone-900/60 rounded-2xl border">${filtered.map(m => `<div class="p-3 rounded-2xl max-w-[80%] ${m.sender===user.username?'ml-auto bg-amber-600 text-white':'mr-auto bg-stone-950 text-amber-100 border'}"><b class="text-amber-300">${m.sender}</b><p>${m.text}</p></div>`).join('')}</div>
+                <div class="flex-1 overflow-y-auto space-y-3 p-3 bg-stone-900/60 rounded-2xl border">${filtered.map(m => `<div class="p-3 rounded-2xl max-w-[80%] ${m.sender===user.username?'ml-auto bg-amber-600 text-white':'mr-auto bg-stone-950 text-amber-100 border'}"><b class="text-amber-300">${escapeHtml(m.sender)}</b><p>${escapeHtml(m.text)}</p></div>`).join('')}</div>
                 <form onsubmit="sendChatMessage(event)" class="flex gap-2"><input type="text" id="chat-inp" required placeholder="Message..." class="flex-1 p-3 bg-stone-900 border rounded-xl text-amber-100"><button type="submit" class="dyn-btn px-6 text-white font-bold rounded-xl">Envoyer</button></form>
             </div>`;
         }
@@ -2859,7 +2876,7 @@
                             <select id="mail-recipient" required class="p-2.5 bg-stone-950 border rounded-xl text-amber-100 font-bold">
                                 <option value="">Choisir un destinataire...</option>
                                 <option value="all">📢 Tout le monde (Diffusion générale)</option>
-                                ${users.filter(u => u.username !== user.username).map(u => `<option value="${u.username}">${u.pseudo || u.username} (${u.role})</option>`).join('')}
+                                ${users.filter(u => u.username !== user.username).map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.pseudo || u.username)} (${u.role})</option>`).join('')}
                             </select>
                             <input type="text" id="mail-subject" required placeholder="Objet du mail..." class="p-2.5 bg-stone-950 border rounded-xl text-amber-100">
                         </div>
@@ -2875,12 +2892,12 @@
                         <div class="dyn-card border p-4 rounded-2xl space-y-2">
                             <div class="flex justify-between items-center border-b border-amber-900/30 pb-2">
                                 <div>
-                                    <span class="font-bold text-amber-300">De : ${m.sender}</span> ➔ <span class="font-bold text-amber-200">Pour : ${m.recipient}</span>
+                                    <span class="font-bold text-amber-300">De : ${escapeHtml(m.sender)}</span> ➔ <span class="font-bold text-amber-200">Pour : ${escapeHtml(m.recipient)}</span>
                                 </div>
-                                <span class="text-[10px] text-amber-200/50">${m.date}</span>
+                                <span class="text-[10px] text-amber-200/50">${escapeHtml(m.date)}</span>
                             </div>
-                            <h4 class="font-bold text-white text-sm">Objet : ${m.subject}</h4>
-                            <p class="text-amber-100 whitespace-pre-line">${m.body}</p>
+                            <h4 class="font-bold text-white text-sm">Objet : ${escapeHtml(m.subject)}</h4>
+                            <p class="text-amber-100 whitespace-pre-line">${escapeHtml(m.body)}</p>
                         </div>
                     `).join('')}
                 </div>
@@ -3210,9 +3227,9 @@
                     ${formations.length === 0 ? '<p class="text-amber-200/50 text-center py-6">Aucune formation publiée pour le moment.</p>' : ''}
                     ${formations.map(f => `
                         <div class="dyn-card border p-5 rounded-2xl space-y-2">
-                            <h3 class="font-bold text-amber-300 text-sm">${f.title}</h3>
-                            <p class="text-amber-100">${f.description}</p>
-                            ${f.link ? `<a href="${f.link}" target="_blank" class="text-amber-400 font-bold underline inline-block mt-1">Lien officiel / Documentation ➔</a>` : ''}
+                            <h3 class="font-bold text-amber-300 text-sm">${escapeHtml(f.title)}</h3>
+                            <p class="text-amber-100">${escapeHtml(f.description)}</p>
+                            ${f.link ? `<a href="${escapeHtml(safeHttpUrl(f.link))}" target="_blank" rel="noopener noreferrer" class="text-amber-400 font-bold underline inline-block mt-1">Lien officiel / Documentation ➔</a>` : ''}
                         </div>
                     `).join('')}
                 </div>
@@ -3235,8 +3252,8 @@
                     ${ideas.map((i, idx) => `
                         <div class="dyn-card border p-4 rounded-2xl flex justify-between items-center">
                             <div>
-                                <h3 class="font-bold text-amber-300 text-sm">${i.title} <span class="text-[9px] text-amber-200/50 font-normal ml-2">Par ${i.author}</span></h3>
-                                <p class="text-amber-100 mt-1">${i.description}</p>
+                                <h3 class="font-bold text-amber-300 text-sm">${escapeHtml(i.title)} <span class="text-[9px] text-amber-200/50 font-normal ml-2">Par ${escapeHtml(i.author)}</span></h3>
+                                <p class="text-amber-100 mt-1">${escapeHtml(i.description)}</p>
                             </div>
                             <button onclick="voteIdea(${idx})" class="px-4 py-2 dyn-btn text-white font-bold rounded-xl">👍 (${i.votes || 0})</button>
                         </div>
@@ -3292,7 +3309,7 @@
                                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${app && app.published?'bg-green-500/20 text-green-300':'bg-stone-800 text-amber-200/50'}">${app && app.published?'Publié':'En attente'}</span>
                                 </div>
                                 ${app && app.published ? `
-                                    <p class="text-amber-100 leading-relaxed font-medium">${app.text || 'Aucune appréciation saisie.'}</p>
+                                    <p class="text-amber-100 leading-relaxed font-medium">${escapeHtml(app.text || 'Aucune appréciation saisie.')}</p>
                                 ` : '<p class="text-amber-200/40 italic py-4">L\'appréciation de ce trimestre n\'a pas encore été publiée.</p>'}
                             </div>
                         `;
@@ -3419,7 +3436,7 @@
                 <div class="grid grid-cols-7 gap-1.5 text-center">${['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(day=>`<div class="py-2 text-[9px] md:text-[10px] uppercase tracking-wider font-black text-amber-200/50">${day}</div>`).join('')}${cells.join('')}</div>
                 <div class="border-t border-amber-900/30 pt-4 space-y-3">
                     <div class="flex flex-wrap items-center justify-between gap-2"><h4 class="font-black text-amber-100 capitalize"><i class="fa-regular fa-calendar-check text-sky-300 mr-2"></i>${selectedDateLabel}</h4>${canManage ? `<button type="button" onclick="agendaCreateForSelectedDay()" class="px-3 py-2 rounded-xl dyn-btn text-white text-[11px] font-bold"><i class="fa-solid fa-plus mr-1"></i>Ajouter un rendez-vous</button>` : ''}</div>
-                    ${selectedPosts.length ? `<div class="space-y-2">${selectedPosts.map(post=>`<article class="p-3 rounded-xl bg-stone-900/70 border border-amber-900/30 flex flex-wrap items-start justify-between gap-2"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="text-[10px] font-black text-sky-300">${String(post.date||'').includes('T') ? escapeHtml(String(post.date).slice(11,16)) : 'Toute la journée'}</span><span class="text-[9px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-200">${escapeHtml(post.category || 'Information')}</span></div><h5 class="font-bold text-amber-100 mt-1">${escapeHtml(post.title || '')}</h5>${post.description?`<p class="text-xs text-amber-100/70 mt-1 whitespace-pre-wrap">${escapeHtml(post.description)}</p>`:''}${post.image?`<img src="${escapeHtml(post.image)}" alt="Illustration" loading="lazy" class="mt-2 max-h-40 rounded-lg object-cover" onerror="this.style.display='none'">`:''}<p class="text-[9px] text-amber-200/40 mt-2">${escapeHtml(post.authorName || 'Équipe pédagogique')}</p></div>${canManage?`<div class="flex gap-1"><button type="button" onclick="editAgendaPost('${encodeURIComponent(post.id)}')" class="px-2.5 py-1.5 bg-stone-800 text-amber-200 rounded-lg text-[10px]">Modifier</button><button type="button" onclick="deleteAgendaPost('${encodeURIComponent(post.id)}')" class="px-2.5 py-1.5 bg-red-900/50 text-red-200 rounded-lg text-[10px]">Supprimer</button></div>`:''}</article>`).join('')}</div>` : '<p class="text-xs text-amber-200/50 py-2">Aucun rendez-vous ou événement prévu ce jour-là.</p>'}
+                    ${selectedPosts.length ? `<div class="space-y-2">${selectedPosts.map(post=>`<article class="p-3 rounded-xl bg-stone-900/70 border border-amber-900/30 flex flex-wrap items-start justify-between gap-2"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="text-[10px] font-black text-sky-300">${String(post.date||'').includes('T') ? escapeHtml(String(post.date).slice(11,16)) : 'Toute la journée'}</span><span class="text-[9px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-200">${escapeHtml(post.category || 'Information')}</span></div><h5 class="font-bold text-amber-100 mt-1">${escapeHtml(post.title || '')}</h5>${post.description?`<p class="text-xs text-amber-100/70 mt-1 whitespace-pre-wrap">${escapeHtml(post.description)}</p>`:''}${post.image?`<img src="${escapeHtml(post.image)}" alt="Illustration" loading="lazy" class="mt-2 max-h-40 rounded-lg object-cover" onerror="this.style.display='none'">`:''}<p class="text-[9px] text-amber-200/40 mt-2">${escapeHtml(post.authorName || 'Équipe pédagogique')}</p></div>${canManage?`<div class="flex gap-1"><button type="button" onclick="editAgendaPost('${jsAttr(encodeURIComponent(post.id))}')" class="px-2.5 py-1.5 bg-stone-800 text-amber-200 rounded-lg text-[10px]">Modifier</button><button type="button" onclick="deleteAgendaPost('${jsAttr(encodeURIComponent(post.id))}')" class="px-2.5 py-1.5 bg-red-900/50 text-red-200 rounded-lg text-[10px]">Supprimer</button></div>`:''}</article>`).join('')}</div>` : '<p class="text-xs text-amber-200/50 py-2">Aucun rendez-vous ou événement prévu ce jour-là.</p>'}
                 </div>
             </section>`;
         }
@@ -3450,7 +3467,7 @@
                     <div><label class="block text-amber-200 mb-1">Photo ou illustration (lien d’image facultatif)</label><input id="agenda-image" type="url" value="${current ? escapeHtml(current.image || '') : ''}" placeholder="https://…" class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100"><p class="text-[10px] text-amber-200/40 mt-1">Utilise un lien direct vers une image accessible publiquement.</p></div>
                     <div class="flex flex-wrap gap-2"><button type="submit" class="flex-1 py-2.5 dyn-btn text-white font-bold rounded-xl"><i class="fa-solid fa-paper-plane mr-2"></i>${current ? 'Enregistrer les modifications' : 'Publier'}</button>${current ? '<button type="button" onclick="cancelAgendaEdit()" class="px-4 py-2.5 bg-stone-800 text-amber-200 rounded-xl">Annuler</button>' : ''}</div>
                 </form>
-                <div class="space-y-2"><h4 class="font-bold text-amber-300">Publications existantes</h4>${posts.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))).map(post=>`<div class="p-3 bg-stone-900 border border-amber-900/30 rounded-xl flex flex-wrap items-center justify-between gap-3"><div class="min-w-0"><b class="text-amber-100">${escapeHtml(post.title)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(formatAgendaDate(post.date))} · ${escapeHtml(post.category || 'Information')}</p></div><div class="flex gap-2"><button onclick="editAgendaPost('${encodeURIComponent(post.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">Modifier</button><button onclick="deleteAgendaPost('${encodeURIComponent(post.id)}')" class="px-3 py-1.5 bg-red-900/60 text-red-200 rounded-lg">Supprimer</button></div></div>`).join('') || '<p class="text-xs text-amber-200/50">Aucune publication.</p>'}</div>
+                <div class="space-y-2"><h4 class="font-bold text-amber-300">Publications existantes</h4>${posts.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))).map(post=>`<div class="p-3 bg-stone-900 border border-amber-900/30 rounded-xl flex flex-wrap items-center justify-between gap-3"><div class="min-w-0"><b class="text-amber-100">${escapeHtml(post.title)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(formatAgendaDate(post.date))} · ${escapeHtml(post.category || 'Information')}</p></div><div class="flex gap-2"><button onclick="editAgendaPost('${jsAttr(encodeURIComponent(post.id))}')" class="px-3 py-1.5 bg-stone-800 text-amber-200 rounded-lg">Modifier</button><button onclick="deleteAgendaPost('${jsAttr(encodeURIComponent(post.id))}')" class="px-3 py-1.5 bg-red-900/60 text-red-200 rounded-lg">Supprimer</button></div></div>`).join('') || '<p class="text-xs text-amber-200/50">Aucune publication.</p>'}</div>
                 </div>
             </div>`;
         }
@@ -3515,7 +3532,7 @@
                 const user = getCurrentUser(), all = DB.get('users') || [];
                 const className = String(user.className || user.class || '').trim();
                 const students = className ? all.filter(x => x.role === 'student' && String(x.className || x.class || '').trim() === className) : [];
-                content = `<div class="dyn-card border p-6 rounded-3xl space-y-4"><h3 class="font-bold text-amber-300">Attribuer ou retirer des points</h3>${className ? `<p class="text-amber-200/70">Classe attribuée : ${escapeHtml(className)}</p>` : '<p class="text-orange-300">Aucune classe n’est associée à ce compte professeur. Demande à l’administrateur de renseigner sa classe dans la gestion des comptes.</p>'}${students.map(u=>`<div class="p-3 bg-stone-900 border rounded-xl flex flex-wrap items-center justify-between gap-2"><div><b>${escapeHtml(u.pseudo || u.username)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(u.username)}</p></div><div class="flex gap-1"><input type="number" step="0.01" min="0" id="pts-val-${escapeHtml(u.username)}" placeholder="Points" class="w-24 p-2 bg-stone-950 border rounded-lg text-amber-100"><button onclick="teacherAdjustPoints('${encodeURIComponent(u.username)}',1)" class="px-3 bg-green-900 text-green-200 rounded-lg">+</button><button onclick="teacherAdjustPoints('${encodeURIComponent(u.username)}',-1)" class="px-3 bg-red-900 text-red-200 rounded-lg">−</button></div></div>`).join('')}${className && !students.length ? '<p class="text-amber-200/50">Aucun élève associé à cette classe.</p>' : ''}</div>`;
+                content = `<div class="dyn-card border p-6 rounded-3xl space-y-4"><h3 class="font-bold text-amber-300">Attribuer ou retirer des points</h3>${className ? `<p class="text-amber-200/70">Classe attribuée : ${escapeHtml(className)}</p>` : '<p class="text-orange-300">Aucune classe n’est associée à ce compte professeur. Demande à l’administrateur de renseigner sa classe dans la gestion des comptes.</p>'}${students.map(u=>`<div class="p-3 bg-stone-900 border rounded-xl flex flex-wrap items-center justify-between gap-2"><div><b>${escapeHtml(u.pseudo || u.username)}</b><p class="text-[10px] text-amber-200/50">${escapeHtml(u.username)}</p></div><div class="flex gap-1"><input type="number" step="0.01" min="0" id="pts-val-${escapeHtml(u.username)}" placeholder="Points" class="w-24 p-2 bg-stone-950 border rounded-lg text-amber-100"><button onclick="teacherAdjustPoints('${jsAttr(encodeURIComponent(u.username))}',1)" class="px-3 bg-green-900 text-green-200 rounded-lg">+</button><button onclick="teacherAdjustPoints('${jsAttr(encodeURIComponent(u.username))}',-1)" class="px-3 bg-red-900 text-red-200 rounded-lg">−</button></div></div>`).join('')}${className && !students.length ? '<p class="text-amber-200/50">Aucun élève associé à cette classe.</p>' : ''}</div>`;
             }
             return `<div class="max-w-5xl mx-auto space-y-4 text-xs"><div class="dyn-card border p-6 rounded-3xl"><h2 class="text-xl font-black text-sky-300"><i class="fa-solid fa-chalkboard-user mr-2"></i>Panneau Prof</h2><p class="text-amber-200/70 mt-2">Gestion des ressources pédagogiques et du suivi de votre classe.</p><div class="flex flex-wrap gap-2 mt-4">${tabs.map(([id,label,icon])=>`<button onclick="state.teacherSub='${id}';render()" class="px-3 py-2 rounded-xl border font-bold ${state.teacherSub===id?'dyn-btn text-white':'bg-stone-900 text-amber-200 border-amber-900/40'}"><i class="fa-solid fa-${icon} mr-1"></i>${label}</button>`).join('')}</div></div>${content}</div>`;
         }
@@ -3612,22 +3629,22 @@
                                 return `
                                     <div class="p-3 bg-stone-900/90 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                                         <div>
-                                            <div class="font-bold text-amber-100">${u.pseudo || u.username} (${u.role}) - <span class="text-amber-400">${pts} pts</span></div>
-                                            <div class="text-[10px] text-amber-200/65">ID : <b>${u.username}</b> | E-mail : <b>${u.email ? escapeHtml(u.email) : '—'}</b></div>
+                                            <div class="font-bold text-amber-100">${escapeHtml(u.pseudo || u.username)} (${u.role}) - <span class="text-amber-400">${pts} pts</span></div>
+                                            <div class="text-[10px] text-amber-200/65">ID : <b>${escapeHtml(u.username)}</b> | E-mail : <b>${u.email ? escapeHtml(u.email) : '—'}</b></div>
                                         </div>
                                         <div class="flex flex-wrap items-center gap-1">
                                             <div class="flex items-center gap-1 bg-stone-950 p-1 rounded-lg border">
-                                                <input type="number" step="any" id="pts-val-${u.username}" placeholder="Pts" class="w-16 p-1 bg-stone-900 border rounded text-amber-200 font-bold text-center">
-                                                <button onclick="adminAddPoints('${u.username}', 1)" class="px-2 py-1 bg-green-900/50 text-green-300 rounded font-bold">+</button>
-                                                <button onclick="adminAddPoints('${u.username}', -1)" class="px-2 py-1 bg-red-900/50 text-red-300 rounded font-bold">-</button>
+                                                <input type="number" step="any" id="pts-val-${escapeHtml(u.username)}" placeholder="Pts" class="w-16 p-1 bg-stone-900 border rounded text-amber-200 font-bold text-center">
+                                                <button onclick="adminAddPoints('${jsAttr(u.username)}', 1)" class="px-2 py-1 bg-green-900/50 text-green-300 rounded font-bold">+</button>
+                                                <button onclick="adminAddPoints('${jsAttr(u.username)}', -1)" class="px-2 py-1 bg-red-900/50 text-red-300 rounded font-bold">-</button>
                                             </div>
-                                            <select onchange="adminChangeRole('${u.username}', this.value)" class="p-1.5 bg-stone-950 border rounded-lg text-amber-300 font-bold">
+                                            <select onchange="adminChangeRole('${jsAttr(u.username)}', this.value)" class="p-1.5 bg-stone-950 border rounded-lg text-amber-300 font-bold">
                                                 <option value="student" ${u.role==='student'?'selected':''}>Élève</option>
                                                 <option value="prof" ${u.role==='prof'?'selected':''}>Professeur</option>
                                                 <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
                                             </select>
-                                            <button onclick="adminSetUserClass('${u.username}')" class="px-2 py-1 bg-sky-900/60 text-sky-200 border rounded-lg">Classe</button>
-                                            <button onclick="adminToggleSuspend('${u.username}')" class="px-2 py-1 ${u.status==='masked'?'bg-green-900 text-green-300':'bg-red-900 text-red-300'} border rounded-lg">${u.status==='masked'?'Activer':'Suspendre'}</button>
+                                            <button onclick="adminSetUserClass('${jsAttr(u.username)}')" class="px-2 py-1 bg-sky-900/60 text-sky-200 border rounded-lg">Classe</button>
+                                            <button onclick="adminToggleSuspend('${jsAttr(u.username)}')" class="px-2 py-1 ${u.status==='masked'?'bg-green-900 text-green-300':'bg-red-900 text-red-300'} border rounded-lg">${u.status==='masked'?'Activer':'Suspendre'}</button>
                                         </div>
                                     </div>
                                 `;
@@ -3745,16 +3762,16 @@
                                     <div class="p-4 bg-stone-900 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                         <div>
                                             <div class="flex items-center gap-2">
-                                                <h6 class="font-bold text-amber-200 text-sm">${c.title}</h6>
+                                                <h6 class="font-bold text-amber-200 text-sm">${escapeHtml(c.title)}</h6>
                                                 <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${c.category || 'Calcul'}</span>
                                                 ${c.hidden ? '<span class="px-2 py-0.5 bg-red-500/20 text-red-300 rounded text-[10px]">Masquée</span>' : ''}
                                             </div>
                                             <p class="text-amber-100/70 text-[11px] font-mono mt-1">${c.formula}</p>
                                         </div>
                                         <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-                                            <button onclick="openEditFicheModal('calc', '${c.id}')" class="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-xl">Modifier</button>
-                                            <button onclick="adminToggleHideFiche('calc', '${c.id}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${c.hidden ? 'Afficher' : 'Masquer'}</button>
-                                            <button onclick="adminDeleteFiche('calc', '${c.id}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
+                                            <button onclick="openEditFicheModal('calc', '${jsAttr(c.id)}')" class="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-xl">Modifier</button>
+                                            <button onclick="adminToggleHideFiche('calc', '${jsAttr(c.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${c.hidden ? 'Afficher' : 'Masquer'}</button>
+                                            <button onclick="adminDeleteFiche('calc', '${jsAttr(c.id)}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
                                         </div>
                                     </div>
                                 `).join('')}
@@ -3765,16 +3782,16 @@
                                     <div class="p-4 bg-stone-900 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                         <div>
                                             <div class="flex items-center gap-2">
-                                                <h6 class="font-bold text-amber-200 text-sm">${g.title}</h6>
-                                                <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${g.subject}</span>
+                                                <h6 class="font-bold text-amber-200 text-sm">${escapeHtml(g.title)}</h6>
+                                                <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">${escapeHtml(g.subject)}</span>
                                                 ${g.hidden ? '<span class="px-2 py-0.5 bg-red-500/20 text-red-300 rounded text-[10px]">Masquée</span>' : ''}
                                             </div>
-                                            <p class="text-amber-100/70 text-[11px] mt-1">${g.intro}</p>
+                                            <p class="text-amber-100/70 text-[11px] mt-1">${escapeHtml(g.intro)}</p>
                                         </div>
                                         <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-                                            <button onclick="openEditFicheModal('general', '${g.id}')" class="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-xl">Modifier</button>
-                                            <button onclick="adminToggleHideFiche('general', '${g.id}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${g.hidden ? 'Afficher' : 'Masquer'}</button>
-                                            <button onclick="adminDeleteFiche('general', '${g.id}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
+                                            <button onclick="openEditFicheModal('general', '${jsAttr(g.id)}')" class="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-xl">Modifier</button>
+                                            <button onclick="adminToggleHideFiche('general', '${jsAttr(g.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${g.hidden ? 'Afficher' : 'Masquer'}</button>
+                                            <button onclick="adminDeleteFiche('general', '${jsAttr(g.id)}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
                                         </div>
                                     </div>
                                 `).join('')}
@@ -3797,7 +3814,7 @@
                                     <label class="block font-bold text-amber-200 mb-1">Sélectionner l'élève :</label>
                                     <select id="sanc-user" required class="w-full p-2.5 bg-stone-950 border rounded-xl text-amber-100 font-bold">
                                         <option value="">Choisir un élève...</option>
-                                        ${users.filter(u => u.role === 'student').map(u => `<option value="${u.username}">${u.pseudo || u.username} (${u.username})</option>`).join('')}
+                                        ${users.filter(u => u.role === 'student').map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.pseudo || u.username)} (${escapeHtml(u.username)})</option>`).join('')}
                                     </select>
                                 </div>
 
@@ -3851,15 +3868,15 @@
                                                 <div class="flex items-center gap-2">
                                                     <span class="font-black text-amber-400">Élève : ${uname}</span>
                                                     <span class="px-2 py-0.5 bg-red-500/20 text-red-300 rounded font-bold text-[10px]">${s.type}</span>
-                                                    <span class="text-[10px] text-amber-200/50">${s.date}</span>
+                                                    <span class="text-[10px] text-amber-200/50">${escapeHtml(s.date)}</span>
                                                 </div>
-                                                <p class="text-amber-100"><b>Motif :</b> ${s.reason}</p>
+                                                <p class="text-amber-100"><b>Motif :</b> ${escapeHtml(s.reason)}</p>
                                                 ${s.deductedPoints > 0 ? `<p class="text-red-400 font-bold text-[10px]">- ${s.deductedPoints} pts déduits</p>` : ''}
                                             </div>
                                             <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-                                                <button onclick="openEditSanctionModal('${uname}', ${sIdx})" class="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-xl">Modifier</button>
-                                                <button onclick="cancelSanction('${uname}', ${sIdx})" class="px-3 py-1.5 bg-stone-800 text-amber-200 font-bold rounded-xl">Annuler</button>
-                                                <button onclick="deleteSanction('${uname}', ${sIdx})" class="px-3 py-1.5 bg-red-900/60 text-red-200 font-bold rounded-xl">Supprimer</button>
+                                                <button onclick="openEditSanctionModal('${jsAttr(uname)}', ${sIdx})" class="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-xl">Modifier</button>
+                                                <button onclick="cancelSanction('${jsAttr(uname)}', ${sIdx})" class="px-3 py-1.5 bg-stone-800 text-amber-200 font-bold rounded-xl">Annuler</button>
+                                                <button onclick="deleteSanction('${jsAttr(uname)}', ${sIdx})" class="px-3 py-1.5 bg-red-900/60 text-red-200 font-bold rounded-xl">Supprimer</button>
                                             </div>
                                         </div>
                                     `).join('');
@@ -3878,7 +3895,7 @@
                         <h3 class="font-bold text-amber-300 text-sm"><i class="fa-solid fa-file-shield mr-2"></i>Édition des Conditions d'Utilisation e-QG (CGU)</h3>
                         <form onsubmit="adminSaveCGU(event)" class="space-y-3">
                             <p class="text-amber-200/70 text-[11px]">Rédigez ou modifiez le texte des conditions d'utilisation. Lors de la sauvegarde, tous les utilisateurs devront cliquer sur le bouton de validation obligatoire.</p>
-                            <textarea id="cgu-editor-text" required class="w-full p-4 bg-stone-900 border rounded-2xl text-amber-100 h-64 resize-none leading-relaxed font-sans" placeholder="Saisissez ici les conditions d'utilisation de l'application e-QG...">${cguConfig.text || ''}</textarea>
+                            <textarea id="cgu-editor-text" required class="w-full p-4 bg-stone-900 border rounded-2xl text-amber-100 h-64 resize-none leading-relaxed font-sans" placeholder="Saisissez ici les conditions d'utilisation de l'application e-QG...">${escapeHtml(cguConfig.text || '')}</textarea>
                             <button type="submit" class="w-full py-3 dyn-btn text-white font-bold rounded-xl text-xs">Publier les nouvelles CGU & Demander Validation</button>
                         </form>
                     </div>
@@ -3937,12 +3954,12 @@
                             ${quests.map(q => `
                                 <div class="p-4 bg-stone-900 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div>
-                                        <h5 class="font-bold text-amber-200 text-sm">${q.title} (${q.points} pts)</h5>
-                                        <p class="text-amber-100/70 text-[11px]">${q.description}</p>
+                                        <h5 class="font-bold text-amber-200 text-sm">${escapeHtml(q.title)} (${q.points} pts)</h5>
+                                        <p class="text-amber-100/70 text-[11px]">${escapeHtml(q.description)}</p>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <button onclick="adminToggleHideQuest('${q.id}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${q.hidden ? 'Afficher' : 'Masquer'}</button>
-                                        <button onclick="adminDeleteQuest('${q.id}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
+                                        <button onclick="adminToggleHideQuest('${jsAttr(q.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${q.hidden ? 'Afficher' : 'Masquer'}</button>
+                                        <button onclick="adminDeleteQuest('${jsAttr(q.id)}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -3964,8 +3981,8 @@
                                 <div class="p-4 bg-stone-900 rounded-2xl border space-y-3">
                                     <div class="flex justify-between items-center border-b border-amber-900/30 pb-2">
                                         <div>
-                                            <h4 class="font-bold text-amber-300 text-sm">${sub.questTitle}</h4>
-                                            <span class="text-[10px] text-amber-200/60">Par <b>${sub.pseudo}</b> (${sub.date})</span>
+                                            <h4 class="font-bold text-amber-300 text-sm">${escapeHtml(sub.questTitle)}</h4>
+                                            <span class="text-[10px] text-amber-200/60">Par <b>${escapeHtml(sub.pseudo)}</b> (${escapeHtml(sub.date)})</span>
                                         </div>
                                         <span class="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded text-[10px] font-bold">Base : ${sub.defaultPoints || 0} pts</span>
                                     </div>
@@ -3974,16 +3991,16 @@
                                         <p class="text-amber-100 font-bold">Résultat Quiz : ${sub.quizScore} / ${sub.quizTotal} réponses correctes</p>
                                     ` : `
                                         <div class="space-y-1">
-                                            ${sub.comment ? `<p class="text-amber-100"><b>Commentaire :</b> ${sub.comment}</p>` : ''}
-                                            ${sub.link ? `<p class="text-amber-100"><b>Lien :</b> <a href="${sub.link}" target="_blank" class="text-amber-400 underline">${sub.link}</a></p>` : ''}
+                                            ${sub.comment ? `<p class="text-amber-100"><b>Commentaire :</b> ${escapeHtml(sub.comment)}</p>` : ''}
+                                            ${sub.link ? `<p class="text-amber-100"><b>Lien :</b> <a href="${escapeHtml(safeHttpUrl(sub.link))}" target="_blank" rel="noopener noreferrer" class="text-amber-400 underline">${escapeHtml(sub.link)}</a></p>` : ''}
                                         </div>
                                     `}
 
                                     <div class="flex items-center gap-2 pt-2 border-t border-amber-900/30">
                                         <span class="font-bold text-amber-200">Attribuer des points :</span>
                                         <input type="number" step="any" id="award-pts-${sub.id}" value="${sub.defaultPoints || 10}" class="w-24 p-1.5 bg-stone-950 border rounded-xl text-amber-300 font-bold text-center">
-                                        <button onclick="adminValidateQuestSubmission('${sub.id}', true)" class="px-4 py-1.5 bg-green-600 text-white font-bold rounded-xl">Valider & Créditer</button>
-                                        <button onclick="adminValidateQuestSubmission('${sub.id}', false)" class="px-4 py-1.5 bg-red-900/60 text-red-200 font-bold rounded-xl">Refuser</button>
+                                        <button onclick="adminValidateQuestSubmission('${jsAttr(sub.id)}', true)" class="px-4 py-1.5 bg-green-600 text-white font-bold rounded-xl">Valider & Créditer</button>
+                                        <button onclick="adminValidateQuestSubmission('${jsAttr(sub.id)}', false)" class="px-4 py-1.5 bg-red-900/60 text-red-200 font-bold rounded-xl">Refuser</button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -4022,7 +4039,7 @@
                         </form>
                         <div class="pt-4 border-t border-amber-900/40 space-y-3">
                             <h4 class="font-black text-amber-300">Grilles publiées</h4>
-                            ${(DB.get('crosswords_grids') || []).length === 0 ? '<p class="text-amber-200/50">Aucune grille publiée.</p>' : (DB.get('crosswords_grids') || []).map(g => `<div class="flex items-center justify-between gap-3 p-3 bg-stone-950 border rounded-xl"><div><b class="text-amber-100">${g.title}</b><div class="text-amber-200/50">${g.words.length} mots</div></div><label class="flex items-center gap-2 text-amber-300 font-bold"><input type="checkbox" ${g.isWeekly ? 'checked' : ''} onchange="adminSetWeeklyCrossword('${g.id}', this.checked)" class="accent-amber-500"> Grille de la semaine</label></div>`).join('')}
+                            ${(DB.get('crosswords_grids') || []).length === 0 ? '<p class="text-amber-200/50">Aucune grille publiée.</p>' : (DB.get('crosswords_grids') || []).map(g => `<div class="flex items-center justify-between gap-3 p-3 bg-stone-950 border rounded-xl"><div><b class="text-amber-100">${escapeHtml(g.title)}</b><div class="text-amber-200/50">${g.words.length} mots</div></div><label class="flex items-center gap-2 text-amber-300 font-bold"><input type="checkbox" ${g.isWeekly ? 'checked' : ''} onchange="adminSetWeeklyCrossword('${jsAttr(g.id)}', this.checked)" class="accent-amber-500"> Grille de la semaine</label></div>`).join('')}
                         </div>
                     </div>
                 `;
@@ -4100,12 +4117,12 @@
                             ${quizzes.map(q => `
                                 <div class="p-4 bg-stone-900 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div>
-                                        <h5 class="font-bold text-amber-200 text-sm">${q.title} (${q.subject})</h5>
+                                        <h5 class="font-bold text-amber-200 text-sm">${escapeHtml(q.title)} (${escapeHtml(q.subject)})</h5>
                                         <p class="text-amber-100/70 text-[11px]">${q.questions.length} questions - ${q.pointsPerQuestion || 10} pts/question</p>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <button onclick="adminToggleHideQuiz('${q.id}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${q.hidden ? 'Afficher' : 'Masquer'}</button>
-                                        <button onclick="adminDeleteQuiz('${q.id}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
+                                        <button onclick="adminToggleHideQuiz('${jsAttr(q.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${q.hidden ? 'Afficher' : 'Masquer'}</button>
+                                        <button onclick="adminDeleteQuiz('${jsAttr(q.id)}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -4123,7 +4140,7 @@
                                 let uApps = apps[u.username] || {};
                                 return `
                                     <div class="p-4 bg-stone-900/90 rounded-2xl border space-y-3">
-                                        <h4 class="font-bold text-amber-400 text-sm">${u.pseudo || u.username} (${u.realName || u.username})</h4>
+                                        <h4 class="font-bold text-amber-400 text-sm">${escapeHtml(u.pseudo || u.username)} (${escapeHtml(u.realName || u.username)})</h4>
                                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                                             ${['T1', 'T2', 'T3'].map(tKey => {
                                                 let appData = uApps[tKey] || { text: '', published: false };
@@ -4131,10 +4148,10 @@
                                                     <div class="p-3 bg-stone-950 rounded-xl border space-y-2">
                                                         <div class="flex justify-between items-center font-bold text-amber-200">
                                                             <span>${tKey}</span>
-                                                            <button type="button" onclick="togglePublishAppreciation('${u.username}', '${tKey}')" class="px-2 py-0.5 text-[9px] rounded font-bold ${appData.published?'bg-green-500/20 text-green-300':'bg-stone-800 text-amber-200/60'}">${appData.published?'Publié':'Masqué'}</button>
+                                                            <button type="button" onclick="togglePublishAppreciation('${jsAttr(u.username)}', '${jsAttr(tKey)}')" class="px-2 py-0.5 text-[9px] rounded font-bold ${appData.published?'bg-green-500/20 text-green-300':'bg-stone-800 text-amber-200/60'}">${appData.published?'Publié':'Masqué'}</button>
                                                         </div>
-                                                        <textarea id="app-${u.username}-${tKey}" class="w-full p-2 bg-stone-900 border rounded-lg text-amber-100 text-xs h-16 resize-none" placeholder="Appréciation...">${appData.text || ''}</textarea>
-                                                        <button type="button" onclick="saveAppreciation('${u.username}', '${tKey}')" class="w-full py-1 dyn-btn text-white font-bold rounded-lg text-[10px]">Enregistrer ${tKey}</button>
+                                                        <textarea id="app-${escapeHtml(u.username)}-${tKey}" class="w-full p-2 bg-stone-900 border rounded-lg text-amber-100 text-xs h-16 resize-none" placeholder="Appréciation...">${escapeHtml(appData.text || '')}</textarea>
+                                                        <button type="button" onclick="saveAppreciation('${jsAttr(u.username)}', '${jsAttr(tKey)}')" class="w-full py-1 dyn-btn text-white font-bold rounded-lg text-[10px]">Enregistrer ${tKey}</button>
                                                     </div>
                                                 `;
                                             }).join('')}
@@ -4200,7 +4217,7 @@
                             </form>
                             <div class="border-t border-amber-900/40 pt-4 mt-4 space-y-3">
                                 <h4 class="font-bold text-amber-300 text-sm">Fiches de révision publiées</h4>
-                                ${(DB.get('revision_sheets') || []).length === 0 ? '<p class="text-amber-200/50 italic">Aucune fiche publiée.</p>' : (DB.get('revision_sheets') || []).map((sheet, index) => `<div class="p-3 bg-stone-900/70 border rounded-xl flex flex-col sm:flex-row justify-between gap-3"><div><div class="font-bold text-amber-100">${sheet.title}</div><div class="text-amber-200/60">Matière : ${sheet.subject || 'Non renseignée'}</div></div><div class="flex flex-wrap gap-2"><button onclick="adminToggleRevisionSheet(${index})" class="px-3 py-1.5 rounded-lg border ${sheet.hidden ? 'bg-green-900 text-green-200' : 'bg-stone-800 text-amber-200'}">${sheet.hidden ? 'Afficher' : 'Masquer'}</button><button onclick="adminEditRevisionSheet(${index})" class="px-3 py-1.5 rounded-lg border bg-blue-900/60 text-blue-200">Modifier</button><button onclick="adminDeleteRevisionSheet(${index})" class="px-3 py-1.5 rounded-lg border bg-red-900/60 text-red-200">Supprimer</button></div></div>`).join('')}
+                                ${(DB.get('revision_sheets') || []).length === 0 ? '<p class="text-amber-200/50 italic">Aucune fiche publiée.</p>' : (DB.get('revision_sheets') || []).map((sheet, index) => `<div class="p-3 bg-stone-900/70 border rounded-xl flex flex-col sm:flex-row justify-between gap-3"><div><div class="font-bold text-amber-100">${escapeHtml(sheet.title)}</div><div class="text-amber-200/60">Matière : ${escapeHtml(sheet.subject || 'Non renseignée')}</div></div><div class="flex flex-wrap gap-2"><button onclick="adminToggleRevisionSheet(${index})" class="px-3 py-1.5 rounded-lg border ${sheet.hidden ? 'bg-green-900 text-green-200' : 'bg-stone-800 text-amber-200'}">${sheet.hidden ? 'Afficher' : 'Masquer'}</button><button onclick="adminEditRevisionSheet(${index})" class="px-3 py-1.5 rounded-lg border bg-blue-900/60 text-blue-200">Modifier</button><button onclick="adminDeleteRevisionSheet(${index})" class="px-3 py-1.5 rounded-lg border bg-red-900/60 text-red-200">Supprimer</button></div></div>`).join('')}
                             </div>
                         </div>
                     </div>
@@ -4225,12 +4242,12 @@
                             ${formations.map(f => `
                                 <div class="p-4 bg-stone-900 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div>
-                                        <h5 class="font-bold text-amber-200 text-sm">${f.title}</h5>
-                                        <p class="text-amber-100/70 text-[11px]">${f.description}</p>
+                                        <h5 class="font-bold text-amber-200 text-sm">${escapeHtml(f.title)}</h5>
+                                        <p class="text-amber-100/70 text-[11px]">${escapeHtml(f.description)}</p>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <button onclick="adminToggleHideFormation('${f.id}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${f.hidden ? 'Afficher' : 'Masquer'}</button>
-                                        <button onclick="adminDeleteFormation('${f.id}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
+                                        <button onclick="adminToggleHideFormation('${jsAttr(f.id)}')" class="px-3 py-1.5 bg-stone-800 text-amber-300 border rounded-xl font-bold">${f.hidden ? 'Afficher' : 'Masquer'}</button>
+                                        <button onclick="adminDeleteFormation('${jsAttr(f.id)}')" class="px-3 py-1.5 bg-red-900/50 text-red-300 border border-red-500/30 rounded-xl font-bold">Supprimer</button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -4281,7 +4298,7 @@
                             <h4 class="font-bold text-amber-300">Exporter un compte spécifique (Excel) :</h4>
                             <div class="flex gap-2">
                                 <select id="export-username-select" class="p-2.5 bg-stone-900 border rounded-xl text-amber-100 font-bold flex-1">
-                                    ${users.map(u => `<option value="${u.username}">${u.pseudo || u.username} (${u.username})</option>`).join('')}
+                                    ${users.map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.pseudo || u.username)} (${escapeHtml(u.username)})</option>`).join('')}
                                 </select>
                                 <button onclick="exportSingleAccountExcel()" class="px-4 py-2.5 dyn-btn text-white font-bold rounded-xl">Exporter ce compte</button>
                             </div>
@@ -4405,7 +4422,7 @@
                 let c = calcs.find(x => x.id === ficheId);
                 if (!c) return;
 
-                document.getElementById('edit-fiche-modal-title').innerHTML = `<i class="fa-solid fa-pen mr-2"></i>Modifier Fiche Calcul : ${c.title}`;
+                document.getElementById('edit-fiche-modal-title').innerHTML = `<i class="fa-solid fa-pen mr-2"></i>Modifier Fiche Calcul : ${escapeHtml(c.title)}`;
                 document.getElementById('ef-calc-title').value = c.title || '';
                 document.getElementById('ef-calc-category').value = c.category || '';
                 document.getElementById('ef-calc-utility').value = c.utility || '';
@@ -4421,7 +4438,7 @@
                 let g = generals.find(x => x.id === ficheId);
                 if (!g) return;
 
-                document.getElementById('edit-fiche-modal-title').innerHTML = `<i class="fa-solid fa-pen mr-2"></i>Modifier Fiche Générale : ${g.title}`;
+                document.getElementById('edit-fiche-modal-title').innerHTML = `<i class="fa-solid fa-pen mr-2"></i>Modifier Fiche Générale : ${escapeHtml(g.title)}`;
                 document.getElementById('ef-gen-title').value = g.title || '';
                 document.getElementById('ef-gen-subject').value = g.subject || '';
                 document.getElementById('ef-gen-intro').value = g.intro || '';
@@ -4651,10 +4668,10 @@
                 scores[sub.username] = parseFloat((current + awarded).toFixed(2));
                 await DB.set('user_scores', scores);
 
-                pushGlobalNotification("⭐ Quête validée !", `Votre travail pour "${sub.questTitle}" a été validé ! +${awarded} pts crédités.`, sub.username);
+                pushGlobalNotification("⭐ Quête validée !", `Votre travail pour "${escapeHtml(sub.questTitle)}" a été validé ! +${awarded} pts crédités.`, sub.username);
             } else {
                 sub.awardedPoints = 0;
-                pushGlobalNotification("❌ Quête refusée", `Votre travail pour "${sub.questTitle}" n'a pas été retenu.`, sub.username);
+                pushGlobalNotification("❌ Quête refusée", `Votre travail pour "${escapeHtml(sub.questTitle)}" n'a pas été retenu.`, sub.username);
             }
 
             submissions[subIdx] = sub;
@@ -5164,7 +5181,7 @@
                 <div class="dyn-card border p-6 rounded-3xl"><h2 class="text-xl font-black text-amber-400"><i class="fa-solid fa-book-open mr-2"></i>${t}</h2></div>
                 ${isRevisionPage ? `<div class="dyn-card border p-4 rounded-2xl"><label class="block font-bold text-amber-200 mb-2">Filtrer par matière :</label><select onchange="state.revisionSubjectFilter=this.value;render()" class="w-full p-2.5 bg-stone-900 border rounded-xl text-amber-100"><option value="">Toutes les matières</option>${subjects.map(subject => `<option value="${subject}" ${selectedSubject===subject?'selected':''}>${subject}</option>`).join('')}</select></div>` : ''}
                 <div class="space-y-3">
-                    ${filteredItems.length === 0 ? '<p class="text-amber-200/50 text-center py-6">Aucune fiche de révision n\'a été publiée.</p>' : filteredItems.map(i => `<div class="dyn-card border p-4 rounded-2xl flex justify-between items-center gap-3"><div><div class="font-bold text-amber-100">${i.title}</div>${isRevisionPage && i.subject ? `<div class="text-amber-200/60 mt-1">${i.subject}</div>` : ''}</div><button onclick="openFileViewer('${i.title}', '${i.link || i.fileData || ''}', '${i.fileType}')" class="px-3 py-1.5 dyn-btn text-white rounded-xl font-bold">Ouvrir</button></div>`).join('')}
+                    ${filteredItems.length === 0 ? '<p class="text-amber-200/50 text-center py-6">Aucune fiche de révision n\'a été publiée.</p>' : filteredItems.map(i => `<div class="dyn-card border p-4 rounded-2xl flex justify-between items-center gap-3"><div><div class="font-bold text-amber-100">${escapeHtml(i.title)}</div>${isRevisionPage && i.subject ? `<div class="text-amber-200/60 mt-1">${escapeHtml(i.subject)}</div>` : ''}</div><button onclick="openFileViewer('${jsAttr(i.title)}', '${jsAttr(i.link || i.fileData || '')}', '${jsAttr(i.fileType)}')" class="px-3 py-1.5 dyn-btn text-white rounded-xl font-bold">Ouvrir</button></div>`).join('')}
                 </div>
             `;
         }
